@@ -51,26 +51,26 @@ module.exports = {
         parserOpts,
         writerOpts: {
           transform: (commit, context) => {
-            // Ignore commits we didn't map to a release (prevents noisy notes)
             const allowed = new Set(["💥", "✨", "🐛", "📝", "🔧", "⚙️"]);
             if (!allowed.has(commit.type)) return;
 
-            // Friendly section mapping in release notes
             const sectionByType = {
               "💥": "Breaking Changes",
               "✨": "Features",
               "🐛": "Bug Fixes",
               "📝": "Documentation",
               "🔧": "Maintenance",
-              "⚙️": "Maintenance"
+              "⚙️": "Maintenance",
             };
 
-            commit.type = sectionByType[commit.type] || "Other";
-
-            // Preserve subject
-            commit.shortHash = commit.hash ? commit.hash.substring(0, 7) : "";
-            return commit;
+            // IMPORTANT: do not mutate `commit` (it may be immutable)
+            return {
+              ...commit,
+              type: sectionByType[commit.type] || "Other",
+              shortHash: commit.hash ? commit.hash.substring(0, 7) : "",
+            };
           },
+
           groupBy: "type",
           commitGroupsSort: (a, b) => {
             const order = [
@@ -79,11 +79,11 @@ module.exports = {
               "Bug Fixes",
               "Documentation",
               "Maintenance",
-              "Other"
+              "Other",
             ];
             return order.indexOf(a.title) - order.indexOf(b.title);
           },
-          commitsSort: ["scope", "subject"]
+          commitsSort: ["scope", "subject"],
         }
       }
     ],
