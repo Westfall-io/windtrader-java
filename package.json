@@ -1,0 +1,11 @@
+{
+  "name": "windtrader-java-release",
+  "private": true,
+  "devDependencies": {
+    "semantic-release": "^24.2.0",
+    "semantic-release-gitmoji": "^1.6.8"
+  },
+  "engines": {
+    "node": ">=20.17.0"
+  }
+}

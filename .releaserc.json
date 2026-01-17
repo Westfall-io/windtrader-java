@@ -1,0 +1,16 @@
+{
+  "branches": ["main"],
+  "plugins": [
+    [
+      "semantic-release-gitmoji",
+      {
+        "releaseRules": {
+          "major": [":boom:"],
+          "minor": [":sparkles:"],
+          "patch": [":bug:", ":ambulance:", ":lock:", ":zap:"],
+          "skip": [":memo:", ":white_check_mark:", ":construction:", ":recycle:"]
+        }
+      }
+    ]
+  ]
+}
