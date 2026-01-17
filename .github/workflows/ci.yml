@@ -35,8 +35,6 @@ jobs:
 
       - name: Build (Maven)
         env:
-          # Use a PAT with read:packages (classic PAT is the most universally reliable)
-          # Store these in repo/org secrets.
           MAVEN_GITHUB_USERNAME: ${{ github.actor }}
           MAVEN_GITHUB_TOKEN: ${{ secrets.SYML_GITHUB_TOKEN }}
         run: mvn -q -DskipTests=true clean package
@@ -46,7 +44,7 @@ jobs:
         run: |
           set -euo pipefail
           # Shade typically creates target/original-*.jar + target/*.jar
-          JAR="$(ls -1 target/*.jar | grep -v '/original-' | head -n 1)"
+          JAR="$(ls -1 target/*.jar | grep -v '^target/original-' | head -n 1)"
           if [ -z "$JAR" ]; then
             echo "Could not find shaded runnable jar in target/"
             ls -lh target || true
@@ -55,14 +53,12 @@ jobs:
           echo "JAR=$JAR" >> "$GITHUB_ENV"
           echo "Using $JAR"
 
-            - name: Smoke test - valid syntax should exit 0
+      - name: Smoke test - valid syntax should exit 0
         run: |
-          JAR="$(ls -1 target/windtrader-java-*.jar | grep -v '^target/original-' | head -n 1)"
           echo "part Stage_1 { attribute mass; }" | java -jar "$JAR" check
 
       - name: Smoke test - invalid keyword should exit 2
         run: |
-          JAR="$(ls -1 target/windtrader-java-*.jar | grep -v '^target/original-' | head -n 1)"
           set +e
           echo "part { attrib mass; }" | java -jar "$JAR" check
           code=$?
@@ -74,7 +70,6 @@ jobs:
 
       - name: Smoke test - echo prints something
         run: |
-          JAR="$(ls -1 target/windtrader-java-*.jar | grep -v '^target/original-' | head -n 1)"
           out="$(echo "part Stage_1 { attribute mass; }" | java -jar "$JAR" echo)"
           if [ -z "$out" ]; then
             echo "Expected non-empty echo output"

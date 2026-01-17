@@ -11,6 +11,17 @@
           "skip": [":memo:", ":white_check_mark:", ":construction:", ":recycle:"]
         }
       }
+    ],
+    [
+      "@semantic-release/github",
+      {
+        "assets": [
+          {
+            "path": "target/*.jar",
+            "label": "windtrader-java shaded jar"
+          }
+        ]
+      }
     ]
   ]
 }
