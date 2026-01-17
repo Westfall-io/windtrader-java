@@ -7,8 +7,10 @@ import org.eclipse.xtext.parser.IParser;
 import org.eclipse.xtext.parser.ParseException;
 import org.omg.sysml.xtext.SysMLStandaloneSetupGenerated;
 
+import java.io.InputStream;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
+import java.util.Properties;
 
 public class RoundTrip {
 
@@ -41,7 +43,7 @@ public class RoundTrip {
         // Critical: register SysML generated package (fixes "Unresolved proxy ... Namespace")
         forceInitEPackage("org.omg.sysml.lang.sysml.SysMLPackage");
 
-        // Common supporting packages (datatype references like String)
+        // Supporting packages (datatype references like String)
         forceInitEPackage("org.eclipse.uml2.types.TypesPackage");
         forceInitEPackage("org.eclipse.uml2.uml.UMLPackage");
 
@@ -68,12 +70,33 @@ public class RoundTrip {
         if (errs == null) return;
 
         for (INode n : errs) {
-            int line = n.getStartLine();
-            int offset = n.getOffset();
+            int line = n.getStartLine();     // available on INode
+            int offset = n.getOffset();      // absolute offset
             String text = n.getText();
             if (text != null) text = text.replace("\n", "\\n");
             System.err.println("error: line=" + line + " offset=" + offset + " near=" + text);
         }
+    }
+
+    private static String readBuildSysmlVersion() {
+        // Populated from a filtered resource in the jar (see pom.xml change below)
+        try (InputStream in = RoundTrip.class.getClassLoader().getResourceAsStream("windtrader.properties")) {
+            if (in == null) return "unknown";
+            Properties p = new Properties();
+            p.load(in);
+            String v = p.getProperty("sysml_version");
+            return (v == null || v.isBlank()) ? "unknown" : v.trim();
+        } catch (Exception e) {
+            return "unknown";
+        }
+    }
+
+    private static void printVersions() {
+        System.out.println("name=windtrader-java");
+        System.out.println("mode=validator");
+        System.out.println("validation=parse-only");
+        System.out.println("java_min=21");
+        System.out.println("sysml_version=" + readBuildSysmlVersion());
     }
 
     public static void main(String[] args) {
@@ -81,10 +104,7 @@ public class RoundTrip {
 
         try {
             if ("versions".equals(cmd)) {
-                System.out.println("name=windtrader-java");
-                System.out.println("mode=validator");
-                System.out.println("validation=parse-only");
-                System.out.println("java_min=21");
+                printVersions();
                 System.exit(EXIT_OK);
                 return;
             }
@@ -114,6 +134,7 @@ public class RoundTrip {
             }
 
             if ("echo".equals(cmd)) {
+                // parse-only echo: print the parsed root text
                 System.out.print(pr.getRootNode().getText());
             }
 
@@ -123,7 +144,6 @@ public class RoundTrip {
             System.err.println("error: msg=" + e.getMessage());
             System.exit(EXIT_INVALID);
         } catch (Throwable t) {
-            // Show the real nested reason; your current output is hiding it behind "msg="
             t.printStackTrace(System.err);
             System.exit(EXIT_RUNTIME);
         }

@@ -10,27 +10,61 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Ensure SYML_GITHUB_TOKEN is set
+        run: |
+          if [ -z "${{ secrets.SYML_GITHUB_TOKEN }}" ]; then
+            echo "Missing required secret SYML_GITHUB_TOKEN"
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Java 21
+      - name: Set up Java 21 (Temurin)
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
           cache: maven
 
+          # Creates ~/.m2/settings.xml server credentials for GitHub Packages (Maven)
+          # Must match the <id> in your pom.xml repo: <id>sysml-github</id>
+          server-id: sysml-github
+          server-username: MAVEN_GITHUB_USERNAME
+          server-password: MAVEN_GITHUB_TOKEN
+
       - name: Build (Maven)
+        env:
+          # Use a PAT with read:packages (classic PAT is the most universally reliable)
+          # Store these in repo/org secrets.
+          MAVEN_GITHUB_USERNAME: ${{ github.actor }}
+          MAVEN_GITHUB_TOKEN: ${{ secrets.SYML_GITHUB_TOKEN }}
         run: mvn -q -DskipTests=true clean package
 
-      - name: Smoke test - valid syntax should exit 0
+      - name: Pick runnable jar
+        shell: bash
         run: |
-          echo "part Stage_1 { attribute mass; }" | java -jar target/*.jar check
+          set -euo pipefail
+          # Shade typically creates target/original-*.jar + target/*.jar
+          JAR="$(ls -1 target/*.jar | grep -v '/original-' | head -n 1)"
+          if [ -z "$JAR" ]; then
+            echo "Could not find shaded runnable jar in target/"
+            ls -lh target || true
+            exit 1
+          fi
+          echo "JAR=$JAR" >> "$GITHUB_ENV"
+          echo "Using $JAR"
+
+            - name: Smoke test - valid syntax should exit 0
+        run: |
+          JAR="$(ls -1 target/windtrader-java-*.jar | grep -v '^target/original-' | head -n 1)"
+          echo "part Stage_1 { attribute mass; }" | java -jar "$JAR" check
 
       - name: Smoke test - invalid keyword should exit 2
         run: |
+          JAR="$(ls -1 target/windtrader-java-*.jar | grep -v '^target/original-' | head -n 1)"
           set +e
-          echo "part { attrib mass; }" | java -jar target/*.jar check
+          echo "part { attrib mass; }" | java -jar "$JAR" check
           code=$?
           set -e
           if [ "$code" -ne 2 ]; then
@@ -40,7 +74,8 @@ jobs:
 
       - name: Smoke test - echo prints something
         run: |
-          out="$(echo "part Stage_1 { attribute mass; }" | java -jar target/*.jar echo)"
+          JAR="$(ls -1 target/windtrader-java-*.jar | grep -v '^target/original-' | head -n 1)"
+          out="$(echo "part Stage_1 { attribute mass; }" | java -jar "$JAR" echo)"
           if [ -z "$out" ]; then
             echo "Expected non-empty echo output"
             exit 1
@@ -50,4 +85,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windtrader-java-jar
-          path: target/*.jar
+          path: ${{ env.JAR }}
