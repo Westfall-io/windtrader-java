@@ -17,7 +17,7 @@
       {
         "assets": [
           {
-            "path": "target/*.jar",
+            "path": "target/windtrader-java.jar",
             "label": "windtrader-java shaded jar"
           }
         ]
