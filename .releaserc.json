@@ -13,6 +13,12 @@
       }
     ],
     [
+      "@semantic-release/exec",
+      {
+        "prepareCmd": "mvn -q -DskipTests clean package && JAR=$(ls -1 target/*.jar | grep -v '^target/original-' | head -n 1) && cp \"$JAR\" \"target/windtrader-java-${nextRelease.version}.jar\""
+      }
+    ],
+    [
       "@semantic-release/github",
       {
         "assets": [
