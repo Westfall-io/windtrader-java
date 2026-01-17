@@ -1,13 +1,13 @@
 /**
- * semantic-release config for gitmoji-only commits + attaching the shaded jar asset.
+ * semantic-release config for gitmoji-only commits + jar asset publishing.
  *
  * Commit examples:
  *   ✨ Add feature
  *   🐛 Fix bug
  *   💥 Breaking change
  *   📝 Docs
- *   🔧 CI/maintenance
- *   ⚙️ Maintenance
+ *   🔧 CI / maintenance
+ *   ⚙️  Maintenance
  */
 
 const headerPattern = /^(\S+)\s(.*)$/;
@@ -46,7 +46,7 @@ module.exports = {
         writerOpts: {
           transform: (commit) => {
             const allowed = new Set(["💥", "✨", "🐛", "📝", "🔧", "⚙️"]);
-            if (!allowed.has(commit.type)) return;
+            if (!allowed.has(commit.type)) return null;
 
             const sectionByType = {
               "💥": "Breaking Changes",
@@ -57,10 +57,11 @@ module.exports = {
               "⚙️": "Maintenance",
             };
 
-            // Do NOT mutate commit (can be immutable); return a new object instead.
+            // IMPORTANT: return a new object (do not mutate commit)
             return {
               ...commit,
               type: sectionByType[commit.type] || "Other",
+              shortHash: commit.hash ? commit.hash.substring(0, 7) : "",
             };
           },
           groupBy: "type",
@@ -75,37 +76,38 @@ module.exports = {
             ];
             return order.indexOf(a.title) - order.indexOf(b.title);
           },
-          commitsSort: ["subject"],
+          commitsSort: ["scope", "subject"],
         },
       },
     ],
 
-    // Create/append CHANGELOG.md each release
     ["@semantic-release/changelog", { changelogFile: "CHANGELOG.md" }],
 
     /**
-     * Rename the Maven-built jar into the release version, and ensure only ONE jar matches the upload pattern.
+     * Rename/canonicalize the Maven-built shaded jar so ONLY ONE jar is eligible for upload:
+     *   target/windtrader-java-${nextRelease.version}.jar
      *
-     * This runs AFTER semantic-release has calculated nextRelease.version.
+     * NOTE: This assumes your workflow already ran `mvn ... package` before `npx semantic-release`.
      */
     [
       "@semantic-release/exec",
       {
         prepareCmd:
           'bash -lc \'set -euo pipefail; ' +
-          // Find any jar that is NOT original-*.jar
-          'JAR="$(find target -maxdepth 1 -type f -name \"*.jar\" ! -name \"original-*.jar\" | head -n 1)\"; ' +
-          'if [ -z \"$JAR\" ]; then echo \"No built jar found in target/. Did the workflow run mvn package?\"; ls -lah target || true; exit 1; fi; ' +
-          'echo \"Using built jar: $JAR\"; ' +
-          // Remove previously versioned jars so only one matches the asset glob
-          'rm -f target/windtrader-java-*.jar; ' +
-          // Copy to the versioned filename for this release
-          'cp \"$JAR\" \"target/windtrader-java-${nextRelease.version}.jar\"; ' +
-          'ls -lah target | sed -n \"1,160p\"\'',
+          // Find the built shaded jar (exclude original-*.jar)
+          'JAR="$(find target -maxdepth 1 -type f -name "*.jar" ! -name "original-*.jar" | head -n 1)"; ' +
+          'if [ -z "$JAR" ]; then echo "No built jar found in target/. Did the workflow run mvn package?"; ls -lah target || true; exit 1; fi; ' +
+          'echo "Found built jar: $JAR"; ' +
+          // Copy to temp first so cleanup can't delete the source
+          'TMP="target/_windtrader_tmp.jar"; cp "$JAR" "$TMP"; ' +
+          // Remove any previously-canonicalized jars
+          'rm -f target/windtrader-java-*.jar target/windtrader-java.jar; ' +
+          // Create the single canonical jar for this release version
+          'mv "$TMP" "target/windtrader-java-${nextRelease.version}.jar"; ' +
+          'ls -lah target | sed -n "1,200p"\'',
       },
     ],
 
-    // Attach the versioned jar to the GitHub Release
     [
       "@semantic-release/github",
       {
@@ -118,12 +120,11 @@ module.exports = {
       },
     ],
 
-    // Commit changelog back to main
     [
       "@semantic-release/git",
       {
         assets: ["CHANGELOG.md"],
-        // IMPORTANT: keep this a normal string (not a JS template literal)
+        // IMPORTANT: normal string, NOT a JS template literal
         message: "🔖 Release v${nextRelease.version}\n\n[skip ci]",
       },
     ],
