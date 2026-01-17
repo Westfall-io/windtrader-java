@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout (same SHA CI built)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -35,6 +35,7 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
+          # Must match <repository><id> in pom.xml
           server-id: sysml-github
           server-username: MAVEN_GITHUB_USERNAME
           server-password: MAVEN_GITHUB_TOKEN
@@ -45,12 +46,19 @@ jobs:
           MAVEN_GITHUB_TOKEN: ${{ secrets.SYML_GITHUB_TOKEN }}
         run: mvn -q -DskipTests clean package
 
-      - name: Normalize jar name for release asset
+      - name: Verify shaded jar exists (and is versioned)
         shell: bash
         run: |
           set -euo pipefail
-          JAR="$(ls -1 target/*.jar | grep -v '^target/original-' | head -n 1)"
-          cp "$JAR" target/windtrader-java.jar
+          echo "Artifacts in target/:"
+          ls -lh target || true
+
+          JAR="$(ls -1 target/windtrader-java-*.jar 2>/dev/null | grep -v '^target/original-' | head -n 1 || true)"
+          if [ -z "$JAR" ]; then
+            echo "Could not find shaded runnable jar (target/windtrader-java-*.jar excluding original-*)"
+            exit 1
+          fi
+          echo "Found shaded jar: $JAR"
 
       - name: Set up Node 20
         uses: actions/setup-node@v4
