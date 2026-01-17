@@ -1,5 +1,5 @@
 /**
- * semantic-release config for gitmoji-only commits.
+ * semantic-release config for gitmoji-only commits + attaching the shaded jar asset.
  *
  * Commit examples:
  *   ✨ Add feature
@@ -7,6 +7,7 @@
  *   💥 Breaking change
  *   📝 Docs
  *   🔧 CI/maintenance
+ *   ⚙️ Maintenance
  */
 
 const headerPattern = /^(\S+)\s(.*)$/;
@@ -14,17 +15,6 @@ const headerPattern = /^(\S+)\s(.*)$/;
 const parserOpts = {
   headerPattern,
   headerCorrespondence: ["type", "subject"],
-};
-
-const allowedTypes = new Set(["💥", "✨", "🐛", "📝", "🔧", "⚙️"]);
-
-const sectionByType = {
-  "💥": "Breaking Changes",
-  "✨": "Features",
-  "🐛": "Bug Fixes",
-  "📝": "Documentation",
-  "🔧": "Maintenance",
-  "⚙️": "Maintenance",
 };
 
 module.exports = {
@@ -55,13 +45,22 @@ module.exports = {
         parserOpts,
         writerOpts: {
           transform: (commit) => {
-            if (!allowedTypes.has(commit.type)) return null;
+            const allowed = new Set(["💥", "✨", "🐛", "📝", "🔧", "⚙️"]);
+            if (!allowed.has(commit.type)) return;
 
-            // IMPORTANT: do not mutate commit (can be immutable)
+            const sectionByType = {
+              "💥": "Breaking Changes",
+              "✨": "Features",
+              "🐛": "Bug Fixes",
+              "📝": "Documentation",
+              "🔧": "Maintenance",
+              "⚙️": "Maintenance",
+            };
+
+            // Do NOT mutate commit (can be immutable); return a new object instead.
             return {
               ...commit,
               type: sectionByType[commit.type] || "Other",
-              shortHash: commit.hash ? commit.hash.substring(0, 7) : "",
             };
           },
           groupBy: "type",
@@ -76,35 +75,37 @@ module.exports = {
             ];
             return order.indexOf(a.title) - order.indexOf(b.title);
           },
-          commitsSort: ["scope", "subject"],
+          commitsSort: ["subject"],
         },
       },
     ],
 
-    // Generates/updates CHANGELOG.md
+    // Create/append CHANGELOG.md each release
     ["@semantic-release/changelog", { changelogFile: "CHANGELOG.md" }],
 
     /**
-     * Create exactly ONE release jar named with the semantic-release version:
-     *   target/windtrader-java-${nextRelease.version}.jar
+     * Rename the Maven-built jar into the release version, and ensure only ONE jar matches the upload pattern.
      *
-     * Assumption: your workflow already ran `mvn ... package` and produced target/*.jar
+     * This runs AFTER semantic-release has calculated nextRelease.version.
      */
     [
       "@semantic-release/exec",
       {
         prepareCmd:
-          "bash -lc \"set -e; JAR=$(ls -1 target/*.jar 2>/dev/null | grep -v '^target/original-' | head -n 1); " +
-          "if [ -z \\\"$JAR\\\" ]; then echo 'No built jar found in target/. Did CI run mvn package?'; ls -lah target || true; exit 1; fi; " +
-          "echo \\\"Using built jar: $JAR\\\"; " +
-          "cp \\\"$JAR\\\" \\\"target/windtrader-java-${nextRelease.version}.jar\\\"; " +
-          "rm -f target/windtrader-java-*.jar; " +
-          "mv \\\"target/windtrader-java-${nextRelease.version}.jar\\\" \\\"target/windtrader-java-${nextRelease.version}.jar\\\"; " +
-          "ls -lah target | sed -n '1,120p'\"",
+          'bash -lc \'set -euo pipefail; ' +
+          // Find any jar that is NOT original-*.jar
+          'JAR="$(find target -maxdepth 1 -type f -name \"*.jar\" ! -name \"original-*.jar\" | head -n 1)\"; ' +
+          'if [ -z \"$JAR\" ]; then echo \"No built jar found in target/. Did the workflow run mvn package?\"; ls -lah target || true; exit 1; fi; ' +
+          'echo \"Using built jar: $JAR\"; ' +
+          // Remove previously versioned jars so only one matches the asset glob
+          'rm -f target/windtrader-java-*.jar; ' +
+          // Copy to the versioned filename for this release
+          'cp \"$JAR\" \"target/windtrader-java-${nextRelease.version}.jar\"; ' +
+          'ls -lah target | sed -n \"1,160p\"\'',
       },
     ],
 
-    // Create GitHub Release + upload jar asset(s)
+    // Attach the versioned jar to the GitHub Release
     [
       "@semantic-release/github",
       {
@@ -117,12 +118,12 @@ module.exports = {
       },
     ],
 
-    // Commit CHANGELOG.md back to main
+    // Commit changelog back to main
     [
       "@semantic-release/git",
       {
         assets: ["CHANGELOG.md"],
-        // IMPORTANT: normal string, not a JS template literal
+        // IMPORTANT: keep this a normal string (not a JS template literal)
         message: "🔖 Release v${nextRelease.version}\n\n[skip ci]",
       },
     ],
