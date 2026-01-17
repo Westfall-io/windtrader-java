@@ -15,7 +15,7 @@
     [
       "@semantic-release/exec",
       {
-        "publishCmd": "set -euo pipefail; JAR=$(ls -1 target/*.jar | grep -v '^target/original-' | head -n 1); echo \"Using built jar: $JAR\"; cp \"$JAR\" \"target/windtrader-java-${nextRelease.version}.jar\"; cp \"$JAR\" \"target/windtrader-java.jar\"; ls -lh target/windtrader-java*.jar"
+        "publishCmd": "bash -lc 'set -euo pipefail; JAR=$(ls -1 target/*.jar | grep -v \"^target/original-\" | head -n 1); echo \"Using built jar: $JAR\"; cp \"$JAR\" \"target/windtrader-java-${nextRelease.version}.jar\"; cp \"$JAR\" \"target/windtrader-java.jar\"; ls -lh target/windtrader-java*.jar'"
       }
     ],
     [
@@ -24,11 +24,7 @@
         "assets": [
           {
             "path": "target/windtrader-java-*.jar",
-            "label": "windtrader-java shaded jar (versioned)"
-          },
-          {
-            "path": "target/windtrader-java.jar",
-            "label": "windtrader-java shaded jar (latest)"
+            "label": "windtrader-java shaded jar (versioned + latest alias)"
           }
         ]
       }
