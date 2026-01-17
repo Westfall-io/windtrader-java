@@ -1,14 +1,10 @@
 /**
- * semantic-release config for gitmoji-only commits.
+ * semantic-release config for gitmoji-only commits + versioned jar asset.
  *
- * Expected commit format examples:
- *   ✨ Add semantic validation command
- *   🐛 Fix EPackage registration
- *   💥 Drop legacy CLI flags
- *   📝 Update README
- *   🔧 CI tweaks
- *
- * The first token (emoji) is treated as the "type".
+ * Key behavior:
+ * - Maven still builds target/windtrader-java-<pomVersion>.jar (e.g. 0.1.0)
+ * - During release, we rename that built jar so it won't be uploaded
+ * - Then we create exactly ONE asset: target/windtrader-java-<nextRelease.version>.jar
  */
 
 const headerPattern = /^(\S+)\s(.*)$/;
@@ -35,13 +31,9 @@ module.exports = {
           { type: "🐛", release: "patch" },
           { type: "📝", release: "patch" },
           { type: "🔧", release: "patch" },
-          { type: "⚙️", release: "patch" }
+          { type: "⚙️", release: "patch" },
         ],
-
-        // If you want to allow "BREAKING CHANGE:" in body to force major bumps:
-        // (This works even with gitmoji-only headers.)
-        // noteKeywords: ["BREAKING CHANGE", "BREAKING CHANGES", "BREAKING"]
-      }
+      },
     ],
 
     [
@@ -50,7 +42,7 @@ module.exports = {
         preset: false,
         parserOpts,
         writerOpts: {
-          transform: (commit, context) => {
+          transform: (commit) => {
             const allowed = new Set(["💥", "✨", "🐛", "📝", "🔧", "⚙️"]);
             if (!allowed.has(commit.type)) return;
 
@@ -63,14 +55,13 @@ module.exports = {
               "⚙️": "Maintenance",
             };
 
-            // IMPORTANT: do not mutate `commit` (it may be immutable)
+            // Do NOT mutate `commit` (it may be immutable)
             return {
               ...commit,
               type: sectionByType[commit.type] || "Other",
               shortHash: commit.hash ? commit.hash.substring(0, 7) : "",
             };
           },
-
           groupBy: "type",
           commitGroupsSort: (a, b) => {
             const order = [
@@ -84,23 +75,50 @@ module.exports = {
             return order.indexOf(a.title) - order.indexOf(b.title);
           },
           commitsSort: ["scope", "subject"],
-        }
-      }
+        },
+      },
     ],
 
-    // Optional but recommended: keep a changelog in-repo
+    // Build a versioned jar for the GitHub Release and ensure ONLY that one matches the glob.
+    [
+      "@semantic-release/exec",
+      {
+        // "prepare" runs after nextRelease.version is known, before publishing.
+        prepareCmd:
+          "bash -lc " +
+          `"set -e; ` +
+          // pick the runnable shaded jar (exclude shade's original- jar)
+          `JAR=\\$(ls -1 target/*.jar 2>/dev/null | grep -v '^target/original-' | head -n 1); ` +
+          `if [ -z \\\"\\$JAR\\\" ]; then echo 'No jar found in target/. Did mvn package run?'; ls -lah target || true; exit 1; fi; ` +
+          `echo Using built jar: \\$JAR; ` +
+          // rename the built jar so it doesn't match windtrader-java-*.jar anymore
+          `mv \\\"\\$JAR\\\" target/_built.jar; ` +
+          // create the *one* release asset we want
+          `cp target/_built.jar \\\"target/windtrader-java-\\${nextRelease.version}.jar\\\"; ` +
+          `ls -lh target/_built.jar target/windtrader-java-\\${nextRelease.version}.jar"`,
+      },
+    ],
+
     ["@semantic-release/changelog", { changelogFile: "CHANGELOG.md" }],
 
-    // Create GitHub Release (semantic-release handles notes/tagging)
-    "@semantic-release/github",
+    [
+      "@semantic-release/github",
+      {
+        assets: [
+          {
+            path: "target/windtrader-java-*.jar",
+            label: "windtrader-java shaded jar",
+          },
+        ],
+      },
+    ],
 
-    // Commit the changelog bump back to main (no version bump in pom.xml needed)
     [
       "@semantic-release/git",
       {
         assets: ["CHANGELOG.md"],
-        message: "🔖 Release v${nextRelease.version}\n\n[skip ci]"
-      }
-    ]
-  ]
+        message: "🔖 Release v${nextRelease.version}\n\n[skip ci]",
+      },
+    ],
+  ],
 };
