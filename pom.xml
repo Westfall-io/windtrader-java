@@ -8,9 +8,17 @@
   <artifactId>windtrader-java</artifactId>
   <version>0.1.0</version>
 
+  <licenses>
+    <license>
+      <name>Eclipse Public License 2.0</name>
+      <url>https://www.eclipse.org/legal/epl-2.0/</url>
+      <distribution>repo</distribution>
+    </license>
+  </licenses>
+
   <properties>
     <maven.compiler.release>21</maven.compiler.release>
-    <sysml.version>0.56.0-20260113.221149-1</sysml.version>
+    <sysml.version>0.60.0</sysml.version>
     <windtrader.sysmlVersion>${sysml.version}</windtrader.sysmlVersion>
   </properties>
 
@@ -69,6 +77,7 @@
                     <Windtrader-SysML-Version>${windtrader.sysmlVersion}</Windtrader-SysML-Version>
                   </manifestEntries>
                 </transformer>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
               </transformers>
             </configuration>
           </execution>

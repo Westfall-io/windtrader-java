@@ -83,10 +83,12 @@ name=windtrader-java
 mode=validator
 validation=parse-only
 java_min=21
-sysml_version=unknown
+sysml_version=0.60.0
 ```
 
-> `sysml_version` is currently reported as `unknown` unless explicitly wired. The Python wrapper should treat this as “best-effort info,” not a hard contract.
+> `sysml_version` is the SysML v2 Pilot Implementation version this build was pinned to
+> (the `<sysml.version>` property in `pom.xml`). It is wired through resource filtering and
+> the jar manifest. The Python wrapper should treat it as informational, not a hard contract.
 
 ---
 
@@ -157,9 +159,18 @@ The wrapper should treat this jar as a black-box validator:
 
 ## License
 
-This project is licensed under the **GNU General Public License v3.0**. See `LICENSE.md`.
+This project is licensed under the **Eclipse Public License 2.0 (EPL-2.0)**. See `LICENSE`.
 
----
+**License origin & boundary:**
+
+- windtrader-java is a thin Java CLI wrapper built on the OMG **SysML v2 Pilot
+  Implementation** (Xtext/EMF-based), which is itself **EPL-2.0**. windtrader-java is
+  therefore distributed under EPL-2.0 to remain license-compatible with the bundled pilot
+  code.
+- The Python **`windtrader`** wrapper invokes this jar as an **external process** (stdin →
+  stdout/stderr → exit code). It does not import or statically link any of this code, so it
+  is **not a derivative work** of windtrader-java or the pilot, and may be independently
+  distributed under the MIT license.
 
 ## Acknowledgements
 
