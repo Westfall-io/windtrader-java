@@ -1,3 +1,10 @@
+## [0.1.2](https://github.com/Westfall-io/windtrader-java/compare/v0.1.1...v0.1.2) (2026-09-11)
+
+
+### Documentation
+
+* Relicense to EPL-2.0 and bump SysML pilot pin to 0.60.0 ([137dc56](https://github.com/Westfall-io/windtrader-java/commit/137dc5637a88c97996a2a20774772fff628d2cb3)), closes [#1](https://github.com/Westfall-io/windtrader-java/issues/1) [#3](https://github.com/Westfall-io/windtrader-java/issues/3)
+
 ## [0.1.1](https://github.com/Westfall-io/windtrader-java/compare/v0.1.0...v0.1.1) (2026-01-17)
 
 
