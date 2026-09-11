@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: EPL-2.0
 package io.westfall.windtrader;
 
 import com.google.inject.Injector;
