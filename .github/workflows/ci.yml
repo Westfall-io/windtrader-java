@@ -76,6 +76,29 @@ jobs:
             exit 1
           fi
 
+      - name: Corpus test - upstream SysML v2 examples all parse (exit 0)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Known pilot-0.60.0 grammar gaps (documented in src/test/resources/upstream/README.md)
+          # must NOT cause failure — only regressions in the expected-pass set matter.
+          skip="Simple-Tests/DecisionTest.sysml Simple-Tests/InterfaceTest.sysml Simple-Tests/RequirementTest.sysml Simple-Tests/ViewTest.sysml"
+          fails=0
+          for f in src/test/resources/upstream/*/*.sysml; do
+            rel="${f#src/test/resources/upstream/}"
+            if printf '%s\n' "$skip" | grep -qF "$rel"; then
+              echo "SKIP (known pilot grammar gap): $rel"
+              continue
+            fi
+            if ! java -jar "$JAR" check < "$f" >/dev/null 2>/tmp/wt-corpus.err; then
+              echo "FAIL: $rel"
+              grep -vE 'SLF4J|log4j|^\[|^WARNING|^INFO|at ' /tmp/wt-corpus.err | head -2
+              fails=$((fails+1))
+            fi
+          done
+          echo "Corpus complete. $fails file(s) failed."
+          if [ "$fails" -gt 0 ]; then exit 1; fi
+
       - name: Upload jar artifact (CI)
         uses: actions/upload-artifact@v4
         with:
