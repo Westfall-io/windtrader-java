@@ -84,23 +84,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Known pilot-0.60.0 grammar gaps (documented in src/test/resources/upstream/README.md)
-          # must NOT cause failure — only regressions in the expected-pass set matter.
-          skip=$'Simple-Tests/DecisionTest.sysml\nSimple-Tests/InterfaceTest.sysml\nSimple-Tests/RequirementTest.sysml\nSimple-Tests/ViewTest.sysml'
-          fails=0
-          for f in src/test/resources/upstream/*/*.sysml; do
+          # With the pilot pinned to 0.62.0, ALL upstream examples must parse (exit 0).
+          # The former 0.60.0 grammar-gap skip-list was removed — any regression fails.
+          fails=0; total=0
+          while IFS= read -r f; do
             rel="${f#src/test/resources/upstream/}"
-            if printf '%s\n' "$skip" | grep -qxF "$rel"; then
-              echo "SKIP (known pilot grammar gap): $rel"
-              continue
-            fi
+            total=$((total+1))
             if ! java -jar "$JAR" check < "$f" >/dev/null 2>/tmp/wt-corpus.err; then
               echo "FAIL: $rel"
               grep -vE 'SLF4J|log4j|^\[|^WARNING|^INFO|at ' /tmp/wt-corpus.err | head -2 || true
               fails=$((fails+1))
             fi
-          done
-          echo "Corpus complete. $fails file(s) failed."
+          done < <(find src/test/resources/upstream -name '*.sysml' | sort)
+          echo "Corpus complete. $total files, $fails failed."
           if [ "$fails" -gt 0 ]; then exit 1; fi
 
       - name: Upload jar artifact (CI)

@@ -8,24 +8,28 @@ repository:
 - Pinned upstream commit: `fb97b754f29588b8e9c7a35f370880cd15eb29e7` ("Updated for 2026-08", 2026-09-11)
 - License: **EPL-2.0** (same as windtrader-java)
 
-Local directory names are hyphenated (`Simple-Tests`, `Mass-Rollup`, `Import-Tests`,
-`Vehicle-Example`) while upstream uses spaces (`Simple Tests`, `Mass Roll-up Example`);
-paths in this repo do NOT match upstream verbatim. To re-sync, copy from the pinned
-commit and re-hyphenate.
-
 They are used to prove that `windtrader-java check` accepts valid SysML v2 models
 (parse-only round trip: parse -> echo -> re-parse). They are NOT authored by Westfall-io
 and are included purely as conformance fixtures.
 
-## Known 0.60.0 grammar gaps (pre-existing, not regressions)
+## Scope
 
-The following canvas-fixtures contain SysML v2 constructs the pinned pilot grammar
-(0.60.0) does not yet accept; they fail with `error: line=... offset=... near=...`
-syntax errors both before and after the RoundTrip driver fix:
+The corpus is the **complete** `sysml/src/examples` tree: all **96** `.sysml` files
+across **22** example directories. With the pilot grammar pinned at **0.62.0**, every
+file in the corpus is expected to parse clean (exit 0) — the CI corpus step fails on any
+regression.
 
-- `Simple-Tests/DecisionTest.sysml` — `succession ... if/then` body
-- `Simple-Tests/InterfaceTest.sysml` — `abstract interface i = i1;` alias
-- `Simple-Tests/RequirementTest.sysml` — `assume`/`require`/`frame` keywords
-- `Simple-Tests/ViewTest.sysml` — `view`/`render` constructs
+## Directory naming
 
-If a future pilot pin accepts them, they should move into the expected-pass set.
+Local directory names are hyphenated (`Simple-Tests`, `Mass-Rollup`, `Import-Tests`,
+`Vehicle-Example`) while upstream uses spaces (`Simple Tests`, `Mass Roll-up Example`,
+`Vehicle Example`); paths in this repo do NOT match upstream verbatim. To re-sync, copy
+from the pinned commit and re-hyphenate.
+
+## Historical note: 0.60.0 grammar gaps
+
+Under the previous pilot pin (0.60.0), four files failed with a pre-existing grammar gap:
+`DecisionTest.sysml` (`succession ... if/then`), `InterfaceTest.sysml` (`abstract
+interface =` alias), `RequirementTest.sysml` (`assume`/`require`/`frame`), and
+`ViewTest.sysml` (`view`/`render`). These constructs are accepted by the 0.62.0 grammar,
+so the gap and its CI skip-list were removed when the project moved to 0.62.0.

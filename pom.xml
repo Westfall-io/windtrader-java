@@ -18,7 +18,7 @@
 
   <properties>
     <maven.compiler.release>21</maven.compiler.release>
-    <sysml.version>0.60.0</sysml.version>
+    <sysml.version>0.62.0</sysml.version>
     <windtrader.sysmlVersion>${sysml.version}</windtrader.sysmlVersion>
   </properties>
 
@@ -36,6 +36,31 @@
       <artifactId>org.omg.sysml.interactive</artifactId>
       <version>${sysml.version}</version>
       <classifier>all</classifier>
+      <exclusions>
+        <!-- The pilot's published `-all` uberjar shades model/logic/sysml/plantuml
+             classes, but its pom still declares internal transitive artifacts that
+             are NOT resolvable from GH Packages (some have `system`-scope pointing
+             at the pilot's own CI runner paths; `sysml`/`plantuml` 0.62.0-SNAPSHOT
+             are unpublished). Exclude them; the shaded uberjar provides the classes.
+             Verified: org.omg.sysml.model.* / logic / plantuml classes are inside the
+             -all jar (48+ model/logic class entries). -->
+        <exclusion>
+          <groupId>org.omg.sysml</groupId>
+          <artifactId>org.omg.sysml.model.bundle</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.omg.sysml</groupId>
+          <artifactId>org.omg.sysml.logic.bundle</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.omg.sysml</groupId>
+          <artifactId>org.omg.sysml</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.omg.sysml</groupId>
+          <artifactId>org.omg.sysml.plantuml</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
   </dependencies>
 
