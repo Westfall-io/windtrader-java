@@ -6,13 +6,25 @@ import org.eclipse.xtext.nodemodel.INode;
 import org.eclipse.xtext.parser.IParseResult;
 import org.eclipse.xtext.parser.IParser;
 import org.eclipse.xtext.parser.ParseException;
-import org.omg.sysml.xtext.SysMLStandaloneSetupGenerated;
+import org.omg.sysml.interactive.SysMLInteractive;
+import org.omg.sysml.xtext.SysMLStandaloneSetup;
 
 import java.io.InputStream;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 import java.util.Properties;
 
+/**
+ * Parse-only validator for SysML v2 text.
+ *
+ * <p>Before parsing, we bootstrap {@link SysMLInteractive#getInstance()} so the pilot's
+ * full EMF/EPackage feature-wiring is registered. Without it, a bare
+ * {@link SysMLStandaloneSetup} parse throws
+ * {@code Unresolved proxy ... EPackage has not been registered} on valid input and NPEs
+ * on unit expressions in feature values (e.g. {@code attribute f = 10.0 [N]}) with
+ * {@code InvocationExpressionImpl.getOperand} -&gt; "settings" is null.
+ * See Westfall-io/windtrader-java#4.
+ */
 public class RoundTrip {
 
     private static final int EXIT_OK = 0;
@@ -30,38 +42,19 @@ public class RoundTrip {
         System.err.println("  versions   : print version info");
     }
 
-    private static void forceInitEPackage(String className) {
-        try {
-            Class.forName(className, true, RoundTrip.class.getClassLoader());
-        } catch (ClassNotFoundException ignored) {
-            // OK: some packages differ by distribution
-        } catch (Throwable t) {
-            throw new RuntimeException("Failed to init EPackage: " + className, t);
-        }
-    }
-
-    private static void initEPackages() {
-        // Critical: register SysML generated package (fixes "Unresolved proxy ... Namespace")
-        forceInitEPackage("org.omg.sysml.lang.sysml.SysMLPackage");
-
-        // Supporting packages (datatype references like String)
-        forceInitEPackage("org.eclipse.uml2.types.TypesPackage");
-        forceInitEPackage("org.eclipse.uml2.uml.UMLPackage");
-
-        // KerML package names vary; try a few (safe if missing)
-        forceInitEPackage("org.omg.kerml.lang.kerml.KerMLPackage");
-        forceInitEPackage("org.omg.kerml.lang.kerml.KermlPackage");
-        forceInitEPackage("org.omg.kerml.lang.KerMLPackage");
-        forceInitEPackage("org.omg.kerml.lang.KermlPackage");
-    }
-
+    /**
+     * Set up the parser. Bootstrap the pilot's interactive machinery first so EPackages
+     * and feature delegates are fully registered, then create the Xtext injector.
+     */
     private static Injector setupInjector() {
-        // IMPORTANT: init generated packages FIRST (correct factories, correct nsURI registration)
-        initEPackages();
-
-        // Then do Xtext registrations
-        new org.omg.kerml.xtext.KerMLStandaloneSetupGenerated().createInjectorAndDoEMFRegistration();
-        return new SysMLStandaloneSetupGenerated().createInjectorAndDoEMFRegistration();
+        // Critical: full EMF/EPackage registration. The bare StandaloneSetupGenerated
+        // leaves EPackages unregistered (invalid input) and feature `settings` delegates
+        // null (NPE on unit expressions). SysMLInteractive.getInstance() performs the
+        // complete wiring the grammar needs (via createInstance()).
+        SysMLInteractive.getInstance();
+        // Use the same hand-written setup class the pilot does — the ...Generated
+        // variant is exactly the distinction that caused this bug on the KerML side.
+        return new SysMLStandaloneSetup().createInjectorAndDoEMFRegistration();
     }
 
     private static void printSyntaxErrors(IParseResult pr) {
@@ -135,8 +128,15 @@ public class RoundTrip {
             }
 
             if ("echo".equals(cmd)) {
-                // parse-only echo: print the parsed root text
-                System.out.print(pr.getRootNode().getText());
+                // Round-trip fidelity: emit the ORIGINAL input text (parse -> echo ->
+                // re-parse yields identical canonical form). We deliberately do not print
+                // a serialized/pretty form, which would not re-parse identically.
+                // Note: a trailing newline is appended when the input lacks one, so the
+                // output is newline-terminated, not byte-exact to input.
+                System.out.print(input);
+                if (!input.endsWith("\n")) {
+                    System.out.println();
+                }
             }
 
             System.exit(EXIT_OK);
