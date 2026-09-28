@@ -1,3 +1,12 @@
+## [0.1.3](https://github.com/Westfall-io/windtrader-java/compare/v0.1.2...v0.1.3) (2026-09-28)
+
+
+### Bug Fixes
+
+* Address code review: anchored corpus skips, fast units regression test, SysMLStandaloneSetup, README pin ([80cff0d](https://github.com/Westfall-io/windtrader-java/commit/80cff0dc8d81814c0d76e03c5d4f1850f1c121ad))
+* Fix unit-expression NPE: bootstrap SysMLInteractive for full EMF/EPackage wiring ([7426996](https://github.com/Westfall-io/windtrader-java/commit/74269961a4cd7c59f4ae3a72b8fdd589b309a2e7))
+* Fix unit-expression NPE: bootstrap SysMLInteractive for full EMF/EPackage wiring (#5) ([6e716fb](https://github.com/Westfall-io/windtrader-java/commit/6e716fbccd41f86da2d4ba97e03bf694d76a61a6)), closes [#5](https://github.com/Westfall-io/windtrader-java/issues/5)
+
 ## [0.1.2](https://github.com/Westfall-io/windtrader-java/compare/v0.1.1...v0.1.2) (2026-09-11)
 
 
