@@ -7,7 +7,7 @@ import org.eclipse.xtext.parser.IParseResult;
 import org.eclipse.xtext.parser.IParser;
 import org.eclipse.xtext.parser.ParseException;
 import org.omg.sysml.interactive.SysMLInteractive;
-import org.omg.sysml.xtext.SysMLStandaloneSetupGenerated;
+import org.omg.sysml.xtext.SysMLStandaloneSetup;
 
 import java.io.InputStream;
 import java.io.StringReader;
@@ -19,7 +19,7 @@ import java.util.Properties;
  *
  * <p>Before parsing, we bootstrap {@link SysMLInteractive#getInstance()} so the pilot's
  * full EMF/EPackage feature-wiring is registered. Without it, a bare
- * {@link SysMLStandaloneSetupGenerated} parse throws
+ * {@link SysMLStandaloneSetup} parse throws
  * {@code Unresolved proxy ... EPackage has not been registered} on valid input and NPEs
  * on unit expressions in feature values (e.g. {@code attribute f = 10.0 [N]}) with
  * {@code InvocationExpressionImpl.getOperand} -&gt; "settings" is null.
@@ -50,9 +50,11 @@ public class RoundTrip {
         // Critical: full EMF/EPackage registration. The bare StandaloneSetupGenerated
         // leaves EPackages unregistered (invalid input) and feature `settings` delegates
         // null (NPE on unit expressions). SysMLInteractive.getInstance() performs the
-        // complete wiring the grammar needs.
+        // complete wiring the grammar needs (via createInstance()).
         SysMLInteractive.getInstance();
-        return new SysMLStandaloneSetupGenerated().createInjectorAndDoEMFRegistration();
+        // Use the same hand-written setup class the pilot does — the ...Generated
+        // variant is exactly the distinction that caused this bug on the KerML side.
+        return new SysMLStandaloneSetup().createInjectorAndDoEMFRegistration();
     }
 
     private static void printSyntaxErrors(IParseResult pr) {
@@ -129,6 +131,8 @@ public class RoundTrip {
                 // Round-trip fidelity: emit the ORIGINAL input text (parse -> echo ->
                 // re-parse yields identical canonical form). We deliberately do not print
                 // a serialized/pretty form, which would not re-parse identically.
+                // Note: a trailing newline is appended when the input lacks one, so the
+                // output is newline-terminated, not byte-exact to input.
                 System.out.print(input);
                 if (!input.endsWith("\n")) {
                     System.out.println();

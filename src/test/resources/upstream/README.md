@@ -5,7 +5,13 @@ repository:
 
 - Source: https://github.com/Systems-Modeling/SysML-v2-Release
 - Path: `sysml/src/examples/`
+- Pinned upstream commit: `fb97b754f29588b8e9c7a35f370880cd15eb29e7` ("Updated for 2026-08", 2026-09-11)
 - License: **EPL-2.0** (same as windtrader-java)
+
+Local directory names are hyphenated (`Simple-Tests`, `Mass-Rollup`, `Import-Tests`,
+`Vehicle-Example`) while upstream uses spaces (`Simple Tests`, `Mass Roll-up Example`);
+paths in this repo do NOT match upstream verbatim. To re-sync, copy from the pinned
+commit and re-hyphenate.
 
 They are used to prove that `windtrader-java check` accepts valid SysML v2 models
 (parse-only round trip: parse -> echo -> re-parse). They are NOT authored by Westfall-io
