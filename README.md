@@ -83,7 +83,7 @@ name=windtrader-java
 mode=validator
 validation=parse-only
 java_min=21
-sysml_version=0.60.0
+sysml_version=0.62.0
 ```
 
 > `sysml_version` is the SysML v2 Pilot Implementation version this build was pinned to

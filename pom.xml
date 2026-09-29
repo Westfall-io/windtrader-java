@@ -18,7 +18,7 @@
 
   <properties>
     <maven.compiler.release>21</maven.compiler.release>
-    <sysml.version>0.60.0</sysml.version>
+    <sysml.version>0.62.0</sysml.version>
     <windtrader.sysmlVersion>${sysml.version}</windtrader.sysmlVersion>
   </properties>
 
@@ -36,6 +36,24 @@
       <artifactId>org.omg.sysml.interactive</artifactId>
       <version>${sysml.version}</version>
       <classifier>all</classifier>
+      <exclusions>
+        <!-- The pilot's `-all` uberjar is self-contained: it shades ALL of its own
+             transitives (model/logic/sysml/plantuml classes, Xtext/EMF/Guice, and the
+             .ecore/resources) into a single jar. Its pom, however, still declares
+             internal transitive artifacts that are NOT resolvable from GH Packages
+             (some have `system`-scope pointing at the pilot's own CI runner paths;
+             `sysml`/`plantuml` 0.62.0-SNAPSHOT are unpublished). The wildcard exclusion
+             states intent: take nothing else from this pom — everything the runtime
+             needs is already shaded in the uberjar.
+             REMOVE-CONDITION: drop this exclusion (or narrow it back to named
+             artifacts) once the pilot publishes resolvable poms for those bundles —
+             i.e. when a 0.62.0+ build works without it. Verified: model/logic/plantuml
+             classes + 52 .ecore are inside the -all jar. -->
+        <exclusion>
+          <groupId>*</groupId>
+          <artifactId>*</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
   </dependencies>
 

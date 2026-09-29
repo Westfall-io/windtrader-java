@@ -80,27 +80,72 @@ jobs:
         run: |
           echo "part Stage_1 { attribute mass = 1000 [kg]; }" | java -jar "$JAR" check
 
+      - name: Smoke test - excluded pilot classes resolve at runtime
+        # The pom excludes the pilot's internal bundle artifacts (model.bundle,
+        # logic.bundle, sysml, plantuml) and relies on the -all uberjar shading them.
+        # Verify representative classes still resolve so a shading gap fails the build.
+        run: |
+          cat > /tmp/RTProbe.java <<'EOF'
+          public class RTProbe {
+            public static void main(String[] a) throws Exception {
+              Class.forName(a[0]);
+              System.out.println("OK " + a[0]);
+            }
+          }
+          EOF
+          javac -d /tmp /tmp/RTProbe.java
+          for c in \
+            org.omg.sysml.model.Branch \
+            org.omg.sysml.logic.SysMLLogicStandaloneSetup \
+            org.omg.sysml.plantuml.SysML2PlantUMLLinkProvider; do
+            java -cp "/tmp:$JAR" RTProbe "$c"
+          done
+
       - name: Corpus test - upstream SysML v2 examples all parse (exit 0)
         shell: bash
         run: |
           set -euo pipefail
-          # Known pilot-0.60.0 grammar gaps (documented in src/test/resources/upstream/README.md)
-          # must NOT cause failure — only regressions in the expected-pass set matter.
-          skip=$'Simple-Tests/DecisionTest.sysml\nSimple-Tests/InterfaceTest.sysml\nSimple-Tests/RequirementTest.sysml\nSimple-Tests/ViewTest.sysml'
-          fails=0
-          for f in src/test/resources/upstream/*/*.sysml; do
+          # With the pilot pinned to 0.62.0, ALL upstream examples must parse AND
+          # round-trip (parse -> echo -> re-parse). The former 0.60.0 grammar-gap
+          # skip-list was removed — any regression fails.
+          fails=0; total=0
+          while IFS= read -r f; do
             rel="${f#src/test/resources/upstream/}"
-            if printf '%s\n' "$skip" | grep -qxF "$rel"; then
-              echo "SKIP (known pilot grammar gap): $rel"
-              continue
-            fi
+            total=$((total+1))
             if ! java -jar "$JAR" check < "$f" >/dev/null 2>/tmp/wt-corpus.err; then
-              echo "FAIL: $rel"
+              echo "FAIL(parse): $rel"
               grep -vE 'SLF4J|log4j|^\[|^WARNING|^INFO|at ' /tmp/wt-corpus.err | head -2 || true
               fails=$((fails+1))
+              continue
             fi
-          done
-          echo "Corpus complete. $fails file(s) failed."
+            # Round-trip leg 1: echo must emit parseable text that re-parses clean.
+            if ! java -jar "$JAR" echo < "$f" >/tmp/wt-echo.sysml 2>/tmp/wt-echo.err \
+               || [ ! -s /tmp/wt-echo.sysml ]; then
+              echo "FAIL(echo): $rel"
+              grep -vE 'SLF4J|log4j|^\[|^WARNING|^INFO|at ' /tmp/wt-echo.err | head -2 || true
+              fails=$((fails+1))
+              continue
+            fi
+            if ! java -jar "$JAR" check < /tmp/wt-echo.sysml >/dev/null 2>/tmp/wt-roundtrip.err; then
+              echo "FAIL(re-parse): $rel"
+              grep -vE 'SLF4J|log4j|^\[|^WARNING|^INFO|at ' /tmp/wt-roundtrip.err | head -2 || true
+              fails=$((fails+1))
+              continue
+            fi
+            # Round-trip leg 2: idempotence — echo(echo(x)) must be byte-identical
+            # to echo(x). Catches progressive loss or unstable output.
+            if ! java -jar "$JAR" echo < /tmp/wt-echo.sysml >/tmp/wt-echo2.sysml 2>/dev/null \
+               || ! cmp -s /tmp/wt-echo.sysml /tmp/wt-echo2.sysml; then
+              echo "FAIL(not idempotent): $rel"
+              fails=$((fails+1))
+            fi
+          done < <(find src/test/resources/upstream -name '*.sysml' | sort)
+          echo "Corpus complete. $total files, $fails failed."
+          # Assert the corpus is complete — a broken/empty path must not pass silently.
+          if [ "$total" -ne 96 ]; then
+            echo "Expected 96 corpus files, found $total (corpus may be incomplete)"
+            exit 1
+          fi
           if [ "$fails" -gt 0 ]; then exit 1; fi
 
       - name: Upload jar artifact (CI)
