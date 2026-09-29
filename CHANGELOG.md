@@ -1,3 +1,11 @@
+## [0.1.4](https://github.com/Westfall-io/windtrader-java/compare/v0.1.3...v0.1.4) (2026-09-29)
+
+
+### Bug Fixes
+
+* Address review: assert 96-file corpus count, add round-trip echo leg, excluded-class smoke test, README pin update ([d9e278e](https://github.com/Westfall-io/windtrader-java/commit/d9e278e697a98bcbd61e339e5f7088f474fd3e58))
+* Review respin: non-empty echo guard + idempotence leg, wildcard exclusion with remove-condition ([0451c63](https://github.com/Westfall-io/windtrader-java/commit/0451c63cfc490442fbb56e3d6bdd6c45fad47bdd))
+
 ## [0.1.3](https://github.com/Westfall-io/windtrader-java/compare/v0.1.2...v0.1.3) (2026-09-28)
 
 
