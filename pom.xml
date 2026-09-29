@@ -37,28 +37,21 @@
       <version>${sysml.version}</version>
       <classifier>all</classifier>
       <exclusions>
-        <!-- The pilot's published `-all` uberjar shades model/logic/sysml/plantuml
-             classes, but its pom still declares internal transitive artifacts that
-             are NOT resolvable from GH Packages (some have `system`-scope pointing
-             at the pilot's own CI runner paths; `sysml`/`plantuml` 0.62.0-SNAPSHOT
-             are unpublished). Exclude them; the shaded uberjar provides the classes.
-             Verified: org.omg.sysml.model.* / logic / plantuml classes are inside the
-             -all jar (48+ model/logic class entries). -->
+        <!-- The pilot's `-all` uberjar is self-contained: it shades ALL of its own
+             transitives (model/logic/sysml/plantuml classes, Xtext/EMF/Guice, and the
+             .ecore/resources) into a single jar. Its pom, however, still declares
+             internal transitive artifacts that are NOT resolvable from GH Packages
+             (some have `system`-scope pointing at the pilot's own CI runner paths;
+             `sysml`/`plantuml` 0.62.0-SNAPSHOT are unpublished). The wildcard exclusion
+             states intent: take nothing else from this pom — everything the runtime
+             needs is already shaded in the uberjar.
+             REMOVE-CONDITION: drop this exclusion (or narrow it back to named
+             artifacts) once the pilot publishes resolvable poms for those bundles —
+             i.e. when a 0.62.0+ build works without it. Verified: model/logic/plantuml
+             classes + 52 .ecore are inside the -all jar. -->
         <exclusion>
-          <groupId>org.omg.sysml</groupId>
-          <artifactId>org.omg.sysml.model.bundle</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>org.omg.sysml</groupId>
-          <artifactId>org.omg.sysml.logic.bundle</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>org.omg.sysml</groupId>
-          <artifactId>org.omg.sysml</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>org.omg.sysml</groupId>
-          <artifactId>org.omg.sysml.plantuml</artifactId>
+          <groupId>*</groupId>
+          <artifactId>*</artifactId>
         </exclusion>
       </exclusions>
     </dependency>
