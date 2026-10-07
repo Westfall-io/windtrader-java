@@ -87,6 +87,19 @@ jobs:
           fi
           echo "$out" | python3 -c "import sys,json; d=json.load(sys.stdin); assert isinstance(d,list) and d, 'expected non-empty JSON list'; p=d[0].get('payload',{}); assert p.get('@id') and p.get('@type'), 'missing @id/@type'"
 
+      - name: Smoke test - invalid export input exits 2 (not 0)
+        run: |
+          # A failed export must not silently exit 0 (would mask failures for
+          # downstream consumers). Invalid syntax on stdin -> exit 2.
+          set +e
+          echo "part { attrib mass; }" | java -jar "$JAR" export >/dev/null 2>&1
+          code=$?
+          set -e
+          if [ "$code" -ne 2 ]; then
+            echo "Expected export exit code 2 for invalid input, got $code"
+            exit 1
+          fi
+
       - name: Smoke test - unit expression in feature value (issue #4 regression)
         run: |
           echo "part Stage_1 { attribute mass = 1000 [kg]; }" | java -jar "$JAR" check

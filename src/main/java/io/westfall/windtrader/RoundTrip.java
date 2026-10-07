@@ -95,11 +95,15 @@ public class RoundTrip {
      * every 100 elements). Only the final JSON (a String) is emitted after stdout
      * restores.
      */
-    private static void runExport(String input, IParser parser) {
+    private static int runExport(String input, IParser parser) {
         java.io.PrintStream realOut = System.out;
         try {
             String json = exportOne(input, parser);
-            if (json != null) realOut.println(json);
+            if (json != null) {
+                realOut.println(json);
+                return EXIT_OK;
+            }
+            return EXIT_RUNTIME;
         } finally {
             System.setOut(realOut);
         }
@@ -368,7 +372,8 @@ public class RoundTrip {
                     System.out.println();
                 }
             } else if ("export".equals(cmd)) {
-                runExport(input, parser);
+                int code = runExport(input, parser);
+                if (code != EXIT_OK) System.exit(code);
             }
 
             System.exit(EXIT_OK);
