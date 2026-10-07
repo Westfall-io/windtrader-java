@@ -94,11 +94,16 @@ public class RoundTrip {
      * (loadLibrary's "Reading <path>..." per library file, and the facade's '.' dots
      * every 100 elements). Only the final JSON (a String) is emitted after stdout
      * restores.
+     *
+     * Exit codes (documented contract for downstream consumers):
+     *   EXIT_OK=0      valid input exported to stdout
+     *   EXIT_INVALID=2 syntax error / no root (also enforced by main's parse gate)
+     *   EXIT_RUNTIME=3 standard library unavailable or transform/export failure
      */
-    private static int runExport(String input, IParser parser) {
+    private static int runExport(Element root) {
         java.io.PrintStream realOut = System.out;
         try {
-            String json = exportOne(input, parser);
+            String json = exportOne(root);
             if (json != null) {
                 realOut.println(json);
                 return EXIT_OK;
@@ -110,17 +115,18 @@ public class RoundTrip {
     }
 
     /**
-     * Export one SysML source to its API-shaped element JSON. Returns the JSON string,
-     * or {@code null} on parse failure / missing library. Mirrors the pilot's Jupyter
-     * pipeline: load the standard library (once per process — callers should share the
-     * interactive across inputs), attach the root to a Resource, resolve + transform,
-     * then run the JsonElementProcessingFacade + Traversal.
+     * Export one already-parsed SysML {@code root} to its API-shaped element JSON.
+     * Returns the JSON string, or {@code null} on failure (missing library or
+     * transform/export error). Mirrors the pilot's Jupyter pipeline: load the standard
+     * library (once per process — callers should share the interactive across inputs),
+     * attach the root to a Resource, resolve + transform, then run the
+     * JsonElementProcessingFacade + Traversal.
      *
      * Sets System.out to a discard stream for the duration (loadLibrary prints
      * "Reading <path>..." and the facade prints '.' progress dots; both would corrupt
      * pure-JSON output). The caller owns restoring System.out.
      */
-    private static String exportOne(String input, IParser parser) {
+    private static String exportOne(Element root) {
         SysMLInteractive interactive = SysMLInteractive.getInstance();
 
         // Locate the bundled SysML standard library: extract from the jar if not
@@ -140,12 +146,6 @@ public class RoundTrip {
             org.eclipse.emf.ecore.resource.Resource res =
                     interactive.getResourceSet().createResource(
                             org.eclipse.emf.common.util.URI.createURI("windtrader-export.sysml"));
-            IParseResult pr2 = parser.parse(new StringReader(input));
-            if (pr2 == null || pr2.hasSyntaxErrors()) {
-                printSyntaxErrors(pr2);
-                return null;
-            }
-            Element root = (Element) pr2.getRootASTElement();
             if (root == null) {
                 System.err.println("error: msg=Parsed successfully but produced no root AST element.");
                 return null;
@@ -186,7 +186,16 @@ public class RoundTrip {
     private static String bundledLibraryDir() {
         String override = System.getenv("WINDTRADER_SYSML_LIBRARY");
         if (override != null && !override.isBlank()) {
-            return override;
+            // Validate the override actually points at a library layout (Kernel
+            // Libraries dir). The pilot's loadLibrary is lenient on a bad path and
+            // would otherwise proceed with an empty library index, silently producing
+            // wrong export shape. A missing override must fail loudly.
+            if (java.nio.file.Files.isDirectory(
+                    java.nio.file.Paths.get(override, "Kernel Libraries"))) {
+                return override;
+            }
+            System.err.println("warning: WINDTRADER_SYSML_LIBRARY override does not contain 'Kernel Libraries': " + override);
+            return null;
         }
         try {
             java.nio.file.Path cache = java.nio.file.Paths.get(
@@ -200,7 +209,10 @@ public class RoundTrip {
                 return cache.toString();
             }
             if (haveResources && extractLibraryTo(cache)) {
-                return cache.toString();
+                // Require the extraction to have produced the expected layout; an
+                // interrupted/partial extraction must not look valid forever.
+                return java.nio.file.Files.isDirectory(
+                        cache.resolve("Kernel Libraries")) ? cache.toString() : null;
             }
             return null;
         } catch (Exception e) {
@@ -275,7 +287,19 @@ public class RoundTrip {
             try {
                 String text = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(path)),
                         java.nio.charset.StandardCharsets.UTF_8);
-                String json = exportOne(text, parser);
+                IParseResult pr = parser.parse(new StringReader(text));
+                if (pr == null || pr.hasSyntaxErrors()) {
+                    System.err.println("FAIL " + path + " (syntax errors)");
+                    fails++;
+                    continue;
+                }
+                Object rootObj = pr.getRootASTElement();
+                if (!(rootObj instanceof Element)) {
+                    System.err.println("FAIL " + path + " (no root element)");
+                    fails++;
+                    continue;
+                }
+                String json = exportOne((Element) rootObj);
                 if (json == null) {
                     System.err.println("FAIL " + path + " (export returned null)");
                     fails++;
@@ -337,7 +361,7 @@ public class RoundTrip {
                 return;
             }
 
-            if (!"check".equals(cmd) && !"echo".equals(cmd) && !"export".equals(cmd) && !"batch-export".equals(cmd)) {
+            if (!"check".equals(cmd) && !"echo".equals(cmd) && !"export".equals(cmd)) {
                 usage();
                 System.exit(EXIT_RUNTIME);
                 return;
@@ -372,7 +396,12 @@ public class RoundTrip {
                     System.out.println();
                 }
             } else if ("export".equals(cmd)) {
-                int code = runExport(input, parser);
+                Object rootObj = pr.getRootASTElement();
+                if (!(rootObj instanceof Element)) {
+                    System.err.println("error: msg=Parsed successfully but produced no root AST element.");
+                    System.exit(EXIT_INVALID);
+                }
+                int code = runExport((Element) rootObj);
                 if (code != EXIT_OK) System.exit(code);
             }
 

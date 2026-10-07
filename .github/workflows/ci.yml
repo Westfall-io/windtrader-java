@@ -100,6 +100,20 @@ jobs:
             exit 1
           fi
 
+      - name: Smoke test - export fails loudly (exit 3) when stdlib is unavailable
+        run: |
+          # Export without the standard library must FAIL LOUDLY (exit 3), not
+          # silently exit 0 with an empty/partial result. Points the library at a
+          # nonexistent dir so the bundle override path is exercised.
+          set +e
+          echo "part def P;" | WINDTRADER_SYSML_LIBRARY=/nonexistent-windtrader-lib java -jar "$JAR" export >/dev/null 2>&1
+          code=$?
+          set -e
+          if [ "$code" -ne 3 ]; then
+            echo "Expected export exit code 3 when stdlib unavailable, got $code"
+            exit 1
+          fi
+
       - name: Smoke test - unit expression in feature value (issue #4 regression)
         run: |
           echo "part Stage_1 { attribute mass = 1000 [kg]; }" | java -jar "$JAR" check
