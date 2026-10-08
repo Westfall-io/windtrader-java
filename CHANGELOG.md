@@ -1,3 +1,22 @@
+# [0.2.0](https://github.com/Westfall-io/windtrader-java/compare/v0.1.4...v0.2.0) (2026-10-08)
+
+
+### Features
+
+* Add SysMLv2 element JSON export mode (bundled stdlib, batch-export, golden tests) ([284d9f9](https://github.com/Westfall-io/windtrader-java/commit/284d9f9ca3d6ac6d055d2d5d01cd9e0d9f5924c8)), closes [#8](https://github.com/Westfall-io/windtrader-java/issues/8)
+
+
+### Bug Fixes
+
+* Address independent review (REQUEST_CHANGES) — fail loudly on transform error, hoist library load, reproducible golden ([5aa5060](https://github.com/Westfall-io/windtrader-java/commit/5aa50600a0faa6941dfb5bd18d2292a6c208343d)), closes [#9](https://github.com/Westfall-io/windtrader-java/issues/9) [#2](https://github.com/Westfall-io/windtrader-java/issues/2) [#4](https://github.com/Westfall-io/windtrader-java/issues/4) [#7](https://github.com/Westfall-io/windtrader-java/issues/7) [#8](https://github.com/Westfall-io/windtrader-java/issues/8) [#10](https://github.com/Westfall-io/windtrader-java/issues/10) [#11](https://github.com/Westfall-io/windtrader-java/issues/11)
+* Fix export silently exiting 0 on failure + add invalid-export smoke test ([1cb0539](https://github.com/Westfall-io/windtrader-java/commit/1cb0539028bc32095e1cd917c3715d8d5218a7c1))
+* Review fixes: fail loudly without stdlib, remove double-parse, tighten export exit contract ([5bc8812](https://github.com/Westfall-io/windtrader-java/commit/5bc8812b128daa07e37bf66740c3dd75ac00aa5d))
+
+
+### Maintenance
+
+* Post-review polish: byte-reproducible golden, error-level rises, cross-path check hardening ([1db7f94](https://github.com/Westfall-io/windtrader-java/commit/1db7f9462ffa919b64c11178813b1ace41728ece)), closes [#9](https://github.com/Westfall-io/windtrader-java/issues/9)
+
 ## [0.1.4](https://github.com/Westfall-io/windtrader-java/compare/v0.1.3...v0.1.4) (2026-09-29)
 
 
