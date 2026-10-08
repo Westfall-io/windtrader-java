@@ -76,6 +76,44 @@ jobs:
             exit 1
           fi
 
+      - name: Smoke test - export emits an API-shaped JSON graph (bundled stdlib)
+        run: |
+          # export must load the bundled SysML standard library from the jar,
+          # then emit parseable JSON: a list of element records with @id/@type.
+          out="$(echo "part def P;" | java -jar "$JAR" export)"
+          if [ -z "$out" ]; then
+            echo "Expected non-empty export JSON"
+            exit 1
+          fi
+          echo "$out" | python3 -c "import sys,json; d=json.load(sys.stdin); assert isinstance(d,list) and d, 'expected non-empty JSON list'; p=d[0].get('payload',{}); assert p.get('@id') and p.get('@type'), 'missing @id/@type'"
+
+      - name: Smoke test - invalid export input exits 2 (not 0)
+        run: |
+          # A failed export must not silently exit 0 (would mask failures for
+          # downstream consumers). Invalid syntax on stdin -> exit 2.
+          set +e
+          echo "part { attrib mass; }" | java -jar "$JAR" export >/dev/null 2>&1
+          code=$?
+          set -e
+          if [ "$code" -ne 2 ]; then
+            echo "Expected export exit code 2 for invalid input, got $code"
+            exit 1
+          fi
+
+      - name: Smoke test - export fails loudly (exit 3) when stdlib is unavailable
+        run: |
+          # Export without the standard library must FAIL LOUDLY (exit 3), not
+          # silently exit 0 with an empty/partial result. Points the library at a
+          # nonexistent dir so the bundle override path is exercised.
+          set +e
+          echo "part def P;" | WINDTRADER_SYSML_LIBRARY=/nonexistent-windtrader-lib java -jar "$JAR" export >/dev/null 2>&1
+          code=$?
+          set -e
+          if [ "$code" -ne 3 ]; then
+            echo "Expected export exit code 3 when stdlib unavailable, got $code"
+            exit 1
+          fi
+
       - name: Smoke test - unit expression in feature value (issue #4 regression)
         run: |
           echo "part Stage_1 { attribute mass = 1000 [kg]; }" | java -jar "$JAR" check
@@ -147,6 +185,64 @@ jobs:
             exit 1
           fi
           if [ "$fails" -gt 0 ]; then exit 1; fi
+
+      - name: Corpus test - export JSON shape matches golden manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The export subcommand must reproduce the normalized-shape golden manifest
+          # (element count + @type multiset + internal dangling-ref count per corpus
+          # file). UUIDs are fresh per parse so byte-golden is impossible; the shape
+          # IS deterministic. This catches dropped @type, broken references, or a
+          # regression in the fixture set.
+          #
+          # The comparator and its committed generator live in scripts/ so the golden
+          # is reproducible (scripts/generate-export-golden.sh), not hand-edited.
+          python3 scripts/check-export-golden.py
+
+      - name: Cross-path check - single-file export shape equals batch-export
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The single-file `export` path and the shared-ResourceSet `batch-export`
+          # path must produce the IDENTICAL normalized shape for the same corpus file
+          # (element count + @type multiset). This is the sentinel for the latent
+          # shared-ResourceSet URI-collision risk in batch-export: if a future corpus
+          # file ever diverges between the two paths, this step fails loudly.
+          # The previous step (check-export-golden.py) already ran batch-export, which
+          # produced <source>.export.json next to each fixture; we compare one file's
+          # single-file export against that batch output.
+          F="src/test/resources/upstream/Simple-Tests/CalculationTest.sysml"
+          java -jar "$JAR" export < "$F" > /tmp/xp-single.json 2>/dev/null
+          python3 - <<'PY'
+          import json, collections, sys
+          def shape(p):
+              d = json.load(open(p))
+              c = collections.Counter(el.get("payload", {}).get("@type","?") for el in d)
+              # dangling refs: any @id referenced but not defined within this file's
+              # element set (includes legitimate refs into the standard library)
+              all_ids = set(el.get("payload", {}).get("@id") for el in d if el.get("payload", {}).get("@id"))
+              refs = []
+              def walk(o):
+                  if isinstance(o, dict):
+                      for k, v in o.items():
+                          if k == "@id": refs.append(v)
+                          else: walk(v)
+                  elif isinstance(o, list):
+                      for x in o: walk(x)
+              for el in d: walk(el.get("payload", {}))
+              dang = len([r for r in refs if r not in all_ids])
+              return len(d), dict(sorted(c.items())), dang
+          single = shape("/tmp/xp-single.json")
+          batch = shape("src/test/resources/upstream/Simple-Tests/CalculationTest.sysml.export.json")
+          ok = single == batch
+          print(f"single count={single[0]} batch count={batch[0]} types={single[1]==batch[1]} dangling={single[2]==batch[2]} overall={ok}")
+          if not ok:
+              print("FAIL: single-file export diverges from batch-export shape (shared-ResourceSet contamination?)")
+              sys.exit(1)
+          print("cross-path check: single-file export shape equals batch-export")
+          PY
+
 
       - name: Upload jar artifact (CI)
         uses: actions/upload-artifact@v4
