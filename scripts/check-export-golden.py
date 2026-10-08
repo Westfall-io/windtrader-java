@@ -9,7 +9,8 @@ Corpus-dir defaults to src/test/resources/upstream (repo-relative).
 import json, collections, os, subprocess, sys
 
 CORPUS = sys.argv[1] if len(sys.argv) > 1 else "src/test/resources/upstream"
-GOLDEN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src", "test", "resources", "export-golden.json")
+GOLDEN = os.environ.get("GOLDEN",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src", "test", "resources", "export-golden.json"))
 golden = json.load(open(GOLDEN))["manifest"]
 
 # Run the single-JVM batch exporter over the whole corpus.
@@ -20,7 +21,7 @@ for root, _, fs in os.walk(CORPUS):
             files.append(os.path.join(root, f))
 files.sort()
 lst = "\n".join(files) + "\n"
-p = subprocess.run(["java", "-jar", os.environ["JAR"], "batch-export"],
+p = subprocess.run([os.environ.get("JAVA", "java"), "-jar", os.environ["JAR"], "batch-export"],
                    input=lst, capture_output=True, text=True, timeout=1800)
 for line in p.stderr.splitlines():
     if line.startswith("FAIL"):
@@ -58,7 +59,11 @@ for path in files:
         print(f"SHAPE-DIFF {rel}: count {cnt} (g {g['count']}), types {types==g['types']}, dangling {dang} (g {g['dangling_refs']})")
         fails += 1
 print(f"Export golden check: {len(files)-fails}/{len(files)} matched, {fails} failed.")
-if len(files) != 96:
-    print(f"Expected 96 corpus files, found {len(files)}")
+# Assert the corpus exactly matches the golden manifest (a broken/empty path or an
+# out-of-sync golden must fail, not pass silently).
+expected = len(golden)
+if len(files) != expected:
+    print(f"Expected {expected} corpus files (per golden), found {len(files)}")
     sys.exit(1)
 sys.exit(1 if fails else 0)
+

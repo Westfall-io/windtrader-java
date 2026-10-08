@@ -174,13 +174,13 @@ public class RoundTrip {
             try {
                 interactive.resolveAllInputResources();
             } catch (Exception rerr) {
-                System.err.println("warning: resolveAllInputResources: " + rerr.getMessage());
+                System.err.println("error: resolveAllInputResources: " + rerr.getMessage());
                 transformFailed = true;
             }
             try {
                 interactive.transformAll(true);
             } catch (Exception terr) {
-                System.err.println("warning: transformAll: " + terr.getMessage());
+                System.err.println("error: transformAll: " + terr.getMessage());
                 transformFailed = true;
             }
             if (transformFailed) {
@@ -221,14 +221,13 @@ public class RoundTrip {
             if (isFullLibraryLayout(override)) {
                 return override;
             }
-            System.err.println("warning: WINDTRADER_SYSML_LIBRARY override does not contain the full library layout "
+            System.err.println("error: WINDTRADER_SYSML_LIBRARY override does not contain the full library layout "
                     + "(Kernel Libraries, Systems Library, Domain Libraries): " + override);
             return null;
         }
         try {
             java.nio.file.Path cache = java.nio.file.Paths.get(
                     System.getProperty("user.home"), ".cache", "windtrader", "sysml-library");
-            boolean haveKernel = java.nio.file.Files.isDirectory(cache.resolve("Kernel Libraries"));
             // A jar-resource bundle marker tells us whether resources exist to extract.
             boolean haveResources = RoundTrip.class.getClassLoader()
                     .getResource("windtrader-lib/marker.txt") != null;

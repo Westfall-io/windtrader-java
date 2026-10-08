@@ -219,11 +219,24 @@ jobs:
           def shape(p):
               d = json.load(open(p))
               c = collections.Counter(el.get("payload", {}).get("@type","?") for el in d)
-              return len(d), dict(sorted(c.items()))
+              # dangling refs: any @id referenced but not defined within this file's
+              # element set (includes legitimate refs into the standard library)
+              all_ids = set(el.get("payload", {}).get("@id") for el in d if el.get("payload", {}).get("@id"))
+              refs = []
+              def walk(o):
+                  if isinstance(o, dict):
+                      for k, v in o.items():
+                          if k == "@id": refs.append(v)
+                          else: walk(v)
+                  elif isinstance(o, list):
+                      for x in o: walk(x)
+              for el in d: walk(el.get("payload", {}))
+              dang = len([r for r in refs if r not in all_ids])
+              return len(d), dict(sorted(c.items())), dang
           single = shape("/tmp/xp-single.json")
           batch = shape("src/test/resources/upstream/Simple-Tests/CalculationTest.sysml.export.json")
           ok = single == batch
-          print(f"single-file export count={single[0]} batch count={batch[0]} type-multiset-match={single[1]==batch[1]} overall={ok}")
+          print(f"single count={single[0]} batch count={batch[0]} types={single[1]==batch[1]} dangling={single[2]==batch[2]} overall={ok}")
           if not ok:
               print("FAIL: single-file export diverges from batch-export shape (shared-ResourceSet contamination?)")
               sys.exit(1)

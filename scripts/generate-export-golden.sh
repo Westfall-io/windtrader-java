@@ -15,18 +15,16 @@ set -eu
 JAR="${1:?usage: generate-export-golden.sh <jar> <corpus-dir> <golden-out>}"
 CORPUS="${2:?usage: generate-export-golden.sh <jar> <corpus-dir> <golden-out>}"
 GOLDEN_OUT="${3:?usage: generate-export-golden.sh <jar> <corpus-dir> <golden-out>}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 find "$CORPUS" -name '*.sysml' | sort > /tmp/golden-files.txt
 N=$(wc -l < /tmp/golden-files.txt)
 echo "generating golden for $N corpus files via batch-export..."
-java -jar "$JAR" batch-export < /tmp/golden-files.txt > /tmp/golden-batch.log 2>&1
-if [ $? -ne 0 ]; then
-  echo "batch-export failed:"
-  tail -20 /tmp/golden-batch.log
+if ! java -jar "$JAR" batch-export < /tmp/golden-files.txt > /tmp/golden-batch.log 2>&1; then
+  echo "batch-export failed:" >&2
+  tail -20 /tmp/golden-batch.log >&2
   exit 1
 fi
-grep -c "^OK " /tmp/golden-batch.log && echo "files exported"
+echo "exported $(grep -c '^OK ' /tmp/golden-batch.log) files"
 
 CORPUS="$CORPUS" GOLDEN_OUT="$GOLDEN_OUT" python3 - <<'PY'
 import json, collections, os, sys
@@ -56,17 +54,29 @@ for root, _, fs in os.walk(corpus):
 files.sort()
 
 manifest = {}
+
+total_elements = 0
+total_dangling = 0
 for path in files:
     rel = os.path.relpath(path, corpus)
     d = json.load(open(path + ".export.json"))
     cnt, types, dang = shape(d)
-    manifest[rel] = {"count": cnt, "types": types, "dangling_refs": dang}
+    manifest[rel] = {"count": cnt, "dangling_refs": dang, "types": types}
+    total_elements += cnt
+    total_dangling += dang
 
+# Schema-identical to the committed export-golden.json: top-level files/ok/totals
+# (ok = number of files passed, an int), entries keyed by relative path with
+# {count, dangling_refs, types}; sorted keys so regeneration is byte-stable.
+golden = {
+    "files": len(manifest),
+    "manifest": manifest,
+    "ok": len(manifest),
+    "total_dangling_refs": total_dangling,
+    "total_elements": total_elements,
+}
 with open(out, "w") as f:
-    json.dump({"generated_by": "scripts/generate-export-golden.sh", "manifest": manifest}, f, indent=2)
+    json.dump(golden, f, indent=2, sort_keys=True)
     f.write("\n")
-total = sum(m["count"] for m in manifest.values())
-total_dang = sum(m["dangling_refs"] for m in manifest.values())
-print(f"wrote {out}: {len(manifest)} files, {total} elements, {total_dang} dangling refs")
+print(f"wrote {out}: {len(manifest)} files, {total_elements} elements, {total_dangling} dangling refs")
 PY
-echo "done"
