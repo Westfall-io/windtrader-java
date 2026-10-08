@@ -103,6 +103,13 @@ public class RoundTrip {
     private static int runExport(Element root) {
         java.io.PrintStream realOut = System.out;
         try {
+            // Load the standard library first (stdout discarded for its "Reading ..."
+            // chatter), once per JVM.
+            System.setOut(new java.io.PrintStream(java.io.OutputStream.nullOutputStream()));
+            if (!ensureLibraryLoaded()) {
+                return EXIT_RUNTIME;
+            }
+            System.setOut(realOut);
             String json = exportOne(root);
             if (json != null) {
                 realOut.println(json);
@@ -114,54 +121,74 @@ public class RoundTrip {
         }
     }
 
-    /**
-     * Export one already-parsed SysML {@code root} to its API-shaped element JSON.
-     * Returns the JSON string, or {@code null} on failure (missing library or
-     * transform/export error). Mirrors the pilot's Jupyter pipeline: load the standard
-     * library (once per process — callers should share the interactive across inputs),
-     * attach the root to a Resource, resolve + transform, then run the
-     * JsonElementProcessingFacade + Traversal.
-     *
-     * Sets System.out to a discard stream for the duration (loadLibrary prints
-     * "Reading <path>..." and the facade prints '.' progress dots; both would corrupt
-     * pure-JSON output). The caller owns restoring System.out.
-     */
-    private static String exportOne(Element root) {
-        SysMLInteractive interactive = SysMLInteractive.getInstance();
+    /** Resolved standard-library dir + whether it's loaded this JVM (set once). */
+    private static String loadedLibDir;
 
-        // Locate the bundled SysML standard library: extract from the jar if not
-        // already extracted, else use the override from WINDTRADER_SYSML_LIBRARY.
+    /**
+     * Resolve the bundled standard library and load it into the process-wide
+     * SysMLInteractive once per JVM. Returns false (and prints a loud error) if the
+     * library is unavailable. Callers must have stdout redirected BEFORE this runs:
+     * loadLibrary prints "Reading <path>..." per library file.
+     */
+    private static boolean ensureLibraryLoaded() {
+        if (loadedLibDir != null) {
+            return true; // already loaded this process
+        }
+        SysMLInteractive interactive = SysMLInteractive.getInstance();
         String libDir = bundledLibraryDir();
         if (libDir == null) {
             System.err.println("error: msg=SysML standard library unavailable; cannot export.");
-            return null;
+            return false;
         }
+        interactive.loadLibrary(libDir);
+        loadedLibDir = libDir;
+        return true;
+    }
+
+    /**
+     * Export one already-parsed SysML {@code root} to its API-shaped element JSON.
+     * Returns the JSON string, or {@code null} on failure (missing library or
+     * transform/export error). Mirrors the pilot's Jupyter pipeline: attach the root
+     * to a Resource, resolve + transform, then run the JsonElementProcessingFacade +
+     * Traversal. Callers must have called {@link #ensureLibraryLoaded()} first (it is
+     * invoked once per process, e.g. once at the top of a batch run).
+     *
+     * Sets System.out to a discard stream for the duration (the facade prints '.'
+     * progress dots, which would corrupt pure-JSON output). The caller owns restoring
+     * System.out.
+     */
+    private static String exportOne(Element root) {
+        SysMLInteractive interactive = SysMLInteractive.getInstance();
 
         // Everything below pollutes stdout; discard it. The caller restores System.out.
         System.setOut(new java.io.PrintStream(java.io.OutputStream.nullOutputStream()));
 
         try {
-            interactive.loadLibrary(libDir);
-
             org.eclipse.emf.ecore.resource.Resource res =
                     interactive.getResourceSet().createResource(
                             org.eclipse.emf.common.util.URI.createURI("windtrader-export.sysml"));
-            if (root == null) {
-                System.err.println("error: msg=Parsed successfully but produced no root AST element.");
-                return null;
-            }
             res.getContents().add(root);
 
             interactive.addResourceToIndex(res);
+            boolean transformFailed = false;
             try {
                 interactive.resolveAllInputResources();
             } catch (Exception rerr) {
                 System.err.println("warning: resolveAllInputResources: " + rerr.getMessage());
+                transformFailed = true;
             }
             try {
                 interactive.transformAll(true);
             } catch (Exception terr) {
                 System.err.println("warning: transformAll: " + terr.getMessage());
+                transformFailed = true;
+            }
+            if (transformFailed) {
+                // Resolve/transform is part of the export contract: a failure here
+                // means the emitted JSON would be partial or wrong-shaped. Fail
+                // loudly (null => caller returns EXIT_RUNTIME) rather than emit
+                // silently-wrong JSON and exit 0.
+                return null;
             }
 
             JsonElementProcessingFacade facade = new JsonElementProcessingFacade();
@@ -186,39 +213,47 @@ public class RoundTrip {
     private static String bundledLibraryDir() {
         String override = System.getenv("WINDTRADER_SYSML_LIBRARY");
         if (override != null && !override.isBlank()) {
-            // Validate the override actually points at a library layout (Kernel
-            // Libraries dir). The pilot's loadLibrary is lenient on a bad path and
-            // would otherwise proceed with an empty library index, silently producing
-            // wrong export shape. A missing override must fail loudly.
-            if (java.nio.file.Files.isDirectory(
-                    java.nio.file.Paths.get(override, "Kernel Libraries"))) {
+            // Validate the override actually points at a full library layout (Kernel
+            // Libraries + Systems Library + Domain Libraries). The pilot's loadLibrary
+            // is lenient on a bad path and would otherwise proceed with an empty or
+            // partial library index, silently producing wrong export shape. A missing
+            // or partial override must fail loudly.
+            if (isFullLibraryLayout(override)) {
                 return override;
             }
-            System.err.println("warning: WINDTRADER_SYSML_LIBRARY override does not contain 'Kernel Libraries': " + override);
+            System.err.println("warning: WINDTRADER_SYSML_LIBRARY override does not contain the full library layout "
+                    + "(Kernel Libraries, Systems Library, Domain Libraries): " + override);
             return null;
         }
         try {
             java.nio.file.Path cache = java.nio.file.Paths.get(
                     System.getProperty("user.home"), ".cache", "windtrader", "sysml-library");
-            java.nio.file.Path kernelDir = cache.resolve("Kernel Libraries");
-            boolean haveKernel = java.nio.file.Files.isDirectory(kernelDir);
+            boolean haveKernel = java.nio.file.Files.isDirectory(cache.resolve("Kernel Libraries"));
             // A jar-resource bundle marker tells us whether resources exist to extract.
             boolean haveResources = RoundTrip.class.getClassLoader()
                     .getResource("windtrader-lib/marker.txt") != null;
-            if (haveKernel) {
+            if (isFullLibraryLayout(cache.toString())) {
                 return cache.toString();
             }
             if (haveResources && extractLibraryTo(cache)) {
-                // Require the extraction to have produced the expected layout; an
+                // Require the extraction to have produced the full expected layout; an
                 // interrupted/partial extraction must not look valid forever.
-                return java.nio.file.Files.isDirectory(
-                        cache.resolve("Kernel Libraries")) ? cache.toString() : null;
+                return isFullLibraryLayout(cache.toString()) ? cache.toString() : null;
             }
             return null;
         } catch (Exception e) {
             System.err.println("warning: bundledLibraryDir: " + e.getMessage());
             return null;
         }
+    }
+
+    /** True if {@code dir} has the three standard-library subdirectories. */
+    private static boolean isFullLibraryLayout(String dir) {
+        if (dir == null) return false;
+        java.nio.file.Path base = java.nio.file.Paths.get(dir);
+        return java.nio.file.Files.isDirectory(base.resolve("Kernel Libraries"))
+                && java.nio.file.Files.isDirectory(base.resolve("Systems Library"))
+                && java.nio.file.Files.isDirectory(base.resolve("Domain Libraries"));
     }
 
     private static boolean extractLibraryTo(java.nio.file.Path cache) {
@@ -283,6 +318,14 @@ public class RoundTrip {
 
         int fails = 0;
         final java.io.PrintStream realOut = System.out; // capture real stdout before exportOne redirects
+        // Load the standard library ONCE for the whole batch (stdout discarded for the
+        // load library's "Reading ..." chatter), matching the once-per-process contract.
+        System.setOut(new java.io.PrintStream(java.io.OutputStream.nullOutputStream()));
+        boolean libOk = ensureLibraryLoaded();
+        System.setOut(realOut);
+        if (!libOk) {
+            System.exit(EXIT_RUNTIME);
+        }
         for (String path : paths) {
             try {
                 String text = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(path)),
@@ -396,10 +439,13 @@ public class RoundTrip {
                     System.out.println();
                 }
             } else if ("export".equals(cmd)) {
+                // main's parse gate above already rejected a null root; keep a
+                // defensive instanceof so a non-Element root can't ClassCast below.
                 Object rootObj = pr.getRootASTElement();
                 if (!(rootObj instanceof Element)) {
                     System.err.println("error: msg=Parsed successfully but produced no root AST element.");
                     System.exit(EXIT_INVALID);
+                    return;
                 }
                 int code = runExport((Element) rootObj);
                 if (code != EXIT_OK) System.exit(code);

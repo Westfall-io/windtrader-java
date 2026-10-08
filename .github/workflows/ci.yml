@@ -195,68 +195,41 @@ jobs:
           # file). UUIDs are fresh per parse so byte-golden is impossible; the shape
           # IS deterministic. This catches dropped @type, broken references, or a
           # regression in the fixture set.
+          #
+          # The comparator and its committed generator live in scripts/ so the golden
+          # is reproducible (scripts/generate-export-golden.sh), not hand-edited.
+          python3 scripts/check-export-golden.py
+
+      - name: Cross-path check - single-file export shape equals batch-export
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The single-file `export` path and the shared-ResourceSet `batch-export`
+          # path must produce the IDENTICAL normalized shape for the same corpus file
+          # (element count + @type multiset). This is the sentinel for the latent
+          # shared-ResourceSet URI-collision risk in batch-export: if a future corpus
+          # file ever diverges between the two paths, this step fails loudly.
+          # The previous step (check-export-golden.py) already ran batch-export, which
+          # produced <source>.export.json next to each fixture; we compare one file's
+          # single-file export against that batch output.
+          F="src/test/resources/upstream/Simple-Tests/CalculationTest.sysml"
+          java -jar "$JAR" export < "$F" > /tmp/xp-single.json 2>/dev/null
           python3 - <<'PY'
-          import json, collections, os, subprocess, sys
-          CORPUS = "src/test/resources/upstream"
-          GOLDEN = "src/test/resources/export-golden.json"
-          golden = json.load(open(GOLDEN))["manifest"]
-
-          # Run the single-JVM batch exporter over the whole corpus.
-          files = []
-          for root, _, fs in os.walk(CORPUS):
-              for f in fs:
-                  if f.endswith(".sysml"):
-                      files.append(os.path.join(root, f))
-          files.sort()
-          lst = "\n".join(files) + "\n"
-          p = subprocess.run(["java","-jar",os.environ["JAR"],"batch-export"],
-                             input=lst, capture_output=True, text=True, timeout=900)
-          ok_count = 0
-          for line in p.stderr.splitlines():
-              if line.startswith("FAIL"):
-                  print(line)
-          if p.returncode != 0:
-              print("batch-export failed:")
-              print(p.stderr)
+          import json, collections, sys
+          def shape(p):
+              d = json.load(open(p))
+              c = collections.Counter(el.get("payload", {}).get("@type","?") for el in d)
+              return len(d), dict(sorted(c.items()))
+          single = shape("/tmp/xp-single.json")
+          batch = shape("src/test/resources/upstream/Simple-Tests/CalculationTest.sysml.export.json")
+          ok = single == batch
+          print(f"single-file export count={single[0]} batch count={batch[0]} type-multiset-match={single[1]==batch[1]} overall={ok}")
+          if not ok:
+              print("FAIL: single-file export diverges from batch-export shape (shared-ResourceSet contamination?)")
               sys.exit(1)
+          print("cross-path check: single-file export shape equals batch-export")
+          PY
 
-          def shape(d):
-              c = collections.Counter(el.get("payload", {}).get("@type", "?") for el in d)
-              all_ids = set(el.get("payload", {}).get("@id") for el in d if el.get("payload", {}).get("@id"))
-              refs = []
-              def walk(o):
-                  if isinstance(o, dict):
-                      for k, v in o.items():
-                          if k == "@id": refs.append(v)
-                          else: walk(v)
-                  elif isinstance(o, list):
-                      for x in o: walk(x)
-              for el in d: walk(el.get("payload", {}))
-              dang = len([r for r in refs if r not in all_ids])
-              return len(d), dict(sorted(c.items())), dang
-
-          fails = 0
-          for path in files:
-              rel = os.path.relpath(path, CORPUS)
-              d = json.load(open(path + ".export.json"))
-              cnt, types, dang = shape(d)
-              g = golden.get(rel)
-              if g is None:
-                  print(f"NO-GOLDEN {rel}")
-                  fails += 1
-                  continue
-              if cnt != g["count"] or types != g["types"] or dang != g["dangling_refs"]:
-                  print(f"SHAPE-DIFF {rel}: count {cnt} (g {g['count']}), types {types==g['types']}, dangling {dang} (g {g['dangling_refs']})")
-                  fails += 1
-              else:
-                  ok_count += 1
-          print(f"Export golden check: {ok_count}/{len(files)} matched, {fails} failed.")
-          # Assert the corpus is complete.
-          if len(files) != 96:
-              print(f"Expected 96 corpus files, found {len(files)}")
-              sys.exit(1)
-          if fails > 0:
-              sys.exit(1)
 
       - name: Upload jar artifact (CI)
         uses: actions/upload-artifact@v4
