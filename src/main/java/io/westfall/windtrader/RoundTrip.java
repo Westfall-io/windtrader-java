@@ -8,8 +8,6 @@ import org.eclipse.xtext.parser.IParser;
 import org.eclipse.xtext.parser.ParseException;
 import org.omg.sysml.interactive.SysMLInteractive;
 import org.omg.sysml.lang.sysml.Element;
-import org.omg.sysml.util.traversal.Traversal;
-import org.omg.sysml.util.traversal.facade.impl.JsonElementProcessingFacade;
 import org.omg.sysml.xtext.SysMLStandaloneSetup;
 
 import java.io.InputStream;
@@ -77,127 +75,194 @@ public class RoundTrip {
         }
     }
 
+    private static String runJupyterExport(String text) {
+        return runJupyterExport(text, null);
+    }
+
     /**
-     * Parse stdin (already read into {@code input}) as SysML and emit the SysMLv2
-     * element JSON graph (API shape) to stdout, using the pilot's own
-     * JsonElementProcessingFacade + Traversal.
+     * Run the pilot's Jupyter-faithful export ({@code SysMLInteractive.export}) over
+     * {@code text}, returning the API-shaped element JSON string.
      *
-     * Preparatory steps mirror the pilot's Jupyter pipeline: load the SysML standard
-     * library (so implicit-type inference can resolve library types like the "merge"
-     * feature that SuccessionAsUsageAdapter needs — without it models with merge-node
-     * successions NPE inside FeatureUtil.chainFeatures), attach the parsed root to an
-     * EMF Resource (the facade's isStandardLibraryElement requires eResource() != null),
-     * then resolve and transform.
+     * <p>The pilot's Jupyter {@code %export} magic resolves a named element and calls
+     * {@code JsonElementProcessingFacade.getTraversal().visit(element)} +
+     * {@code toJsonTree(true)} on it (see
+     * {@code org.omg.sysml.jupyter.kernel.magic.Export} / {@code SysMLInteractive.export}).
+     * This reproduces that path exactly: {@code process(text)} to load the text into
+     * the interactive's resource set, derive the root element's export name, then call
+     * the public {@code export(name, [])}. It is deliberately NOT the
+     * {@code SysML2JSON} CLI (which runs transformAll over all roots and NPEs on
+     * control-flow/cross-resource models — a CLI-only defect the Jupyter path does
+     * not have). See Westfall-io/windtrader-java#11.
      *
-     * The whole operation runs with System.out redirected to a discard stream: the
-     * pilot writes things to stdout that would corrupt the pure-JSON contract
-     * (loadLibrary's "Reading <path>..." per library file, and the facade's '.' dots
-     * every 100 elements). Only the final JSON (a String) is emitted after stdout
-     * restores.
+     * <p>The Jupyter kernel accumulates parsed cells in its resource set, so a cell that
+     * {@code import PictureTaking::*} resolves {@code PictureTaking} because an earlier cell
+     * loaded it. When {@code sourcePath} is provided we reproduce that accumulated model:
+     * before processing the target text we {@code process()} its same-directory sibling
+     * {@code .sysml} files that it imports, in dependency (topological) order. Without this,
+     * a single file split across sibling files (Camera→PictureTaking, the Arrowhead library
+     * chain) fails with "Couldn't resolve reference to Namespace 'X'" exactly as it would in
+     * a Jupyter cell with no earlier cell defining X.
      *
-     * Exit codes (documented contract for downstream consumers):
-     *   EXIT_OK=0      valid input exported to stdout
-     *   EXIT_INVALID=2 syntax error / no root (also enforced by main's parse gate)
-     *   EXIT_RUNTIME=3 standard library unavailable or transform/export failure
+     * <p>The output is the expanded element graph (all EStructuralFeatures, with
+     * {@code @id} links to referenced elements), deterministic in shape (count +
+     * type multiset) though {@code @id}s are fresh UUIDs per run.
+     *
+     * @return the JSON string, or {@code null} on failure (library unavailable / error)
      */
-    private static int runExport(Element root) {
+    private static String runJupyterExport(String text, String sourcePath) {
         java.io.PrintStream realOut = System.out;
+        // SysMLInteractive.process / export / loadLibrary print "Reading..." chatter;
+        // discard stdout so the export stays pure JSON.
+        System.setOut(new java.io.PrintStream(java.io.OutputStream.nullOutputStream()));
         try {
-            // Load the standard library first (stdout discarded for its "Reading ..."
-            // chatter), once per JVM.
-            System.setOut(new java.io.PrintStream(java.io.OutputStream.nullOutputStream()));
-            if (!ensureLibraryLoaded()) {
-                return EXIT_RUNTIME;
+            String libDir = ensureLibraryDir();
+            if (libDir == null) {
+                return null;
             }
-            System.setOut(realOut);
-            String json = exportOne(root);
-            if (json != null) {
-                realOut.println(json);
-                return EXIT_OK;
+            SysMLInteractive interactive = SysMLInteractive.getInstance();
+            interactive.loadLibrary(libDir);
+            // Reproduce Jupyter's accumulated resource set: preload the target's
+            // same-directory sibling imports in dependency order before the target.
+            if (sourcePath != null) {
+                preloadSiblingImports(interactive, sourcePath);
             }
-            return EXIT_RUNTIME;
+            org.omg.sysml.interactive.SysMLInteractiveResult result = interactive.process(text);
+            // Note: we deliberately do NOT gate on result.hasErrors(). The pilot's
+            // Jupyter %export resolves the named element and exports regardless of
+            // validation issues (SysMLInteractive.export only fails if resolve(name)
+            // returns null). Matching that, we proceed to export the root even if the
+            // model has semantic errors — otherwise models with warnings/errors that
+            // Jupyter still exports would fail here. A null root/result is a real failure.
+            if (result == null || result.getRootElement() == null) {
+                System.err.println("error: msg=export: input produced no root element; cannot export.");
+                return null;
+            }
+            Element root = result.getRootElement();
+            String name = (root == null) ? null : root.getQualifiedName();
+            if ((name == null || name.isBlank()) && root instanceof org.omg.sysml.lang.sysml.Namespace) {
+                // Bare part def / usage: root namespace is unnamed; use first named
+                // owned member (e.g. the member element of a bare `part def P;`).
+                for (Element m : ((org.omg.sysml.lang.sysml.Namespace) root).getOwnedMember()) {
+                    String mn = m.getName();
+                    if (mn != null && !mn.isBlank()) { name = mn; break; }
+                }
+            }
+            if (name == null || name.isBlank()) {
+                System.err.println("error: msg=export: cannot determine an exportable root element name.");
+                return null;
+            }
+            Object exported = interactive.export(name, java.util.Collections.emptyList());
+            if (exported == null) {
+                System.err.println("error: msg=export: pilot export returned null.");
+                return null;
+            }
+            String json = String.valueOf(exported);
+            // The pilot's export() returns "ERROR:Couldn't resolve reference to
+            // Element 'X'" as a plain string when resolve(name) fails (e.g. bare
+            // top-level definitions the Jupyter %export magic also cannot resolve).
+            // Treat that as a loud failure — never emit an error string as export JSON.
+            if (json.startsWith("ERROR:")) {
+                System.err.println("error: msg=export: pilot could not resolve root element '" + name + "': " + json.trim());
+                return null;
+            }
+            return json;
+        } catch (Throwable t) {
+            t.printStackTrace(System.err);
+            return null;
         } finally {
             System.setOut(realOut);
         }
     }
 
-    /** Resolved standard-library dir + whether it's loaded this JVM (set once). */
-    private static String loadedLibDir;
-
     /**
-     * Resolve the bundled standard library and load it into the process-wide
-     * SysMLInteractive once per JVM. Returns false (and prints a loud error) if the
-     * library is unavailable. Callers must have stdout redirected BEFORE this runs:
-     * loadLibrary prints "Reading <path>..." per library file.
+     * Preload a model's same-directory sibling {@code .sysml} imports into the
+     * interactive's resource set, in dependency (topological) order, mirroring how
+     * Jupyter accumulates parsed cells so a later cell's {@code import Sibling::*}
+     * resolves.
+     *
+     * <p>Only siblings physically present next to {@code sourcePath} that the target
+     * (transitively) imports are processed; standard-library namespaces (ScalarValues,
+     * SI, Time, ...) are already provided by {@code loadLibrary} and never re-processed
+     * here. We look for {@code import Ns::*} / {@code import Ns::**} statements in each
+     * file and map {@code Ns} to an adjacent {@code Ns.sysml}.
      */
-    private static boolean ensureLibraryLoaded() {
-        if (loadedLibDir != null) {
-            return true; // already loaded this process
+    private static void preloadSiblingImports(SysMLInteractive interactive, String sourcePath) {
+        try {
+            java.util.Set<String> visited = new java.util.HashSet<>();
+            java.util.List<String> order = new java.util.ArrayList<>();
+            resolveImports(sourcePath, visited, order);
+            for (String sibling : order) {
+                if (!sibling.equals(sourcePath)) {
+                    String txt = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(sibling)),
+                            java.nio.charset.StandardCharsets.UTF_8);
+                    interactive.process(txt);
+                }
+            }
+        } catch (Throwable t) {
+            // Preload is best-effort: a missing/unreadable sibling must not abort the
+            // export (the pilot's export() will surface the real resolution error if any).
         }
-        SysMLInteractive interactive = SysMLInteractive.getInstance();
-        String libDir = bundledLibraryDir();
-        if (libDir == null) {
-            System.err.println("error: msg=SysML standard library unavailable; cannot export.");
-            return false;
-        }
-        interactive.loadLibrary(libDir);
-        loadedLibDir = libDir;
-        return true;
     }
 
     /**
-     * Export one already-parsed SysML {@code root} to its API-shaped element JSON.
-     * Returns the JSON string, or {@code null} on failure (missing library or
-     * transform/export error). Mirrors the pilot's Jupyter pipeline: attach the root
-     * to a Resource, resolve + transform, then run the JsonElementProcessingFacade +
-     * Traversal. Callers must have called {@link #ensureLibraryLoaded()} first (it is
-     * invoked once per process, e.g. once at the top of a batch run).
-     *
-     * Sets System.out to a discard stream for the duration (the facade prints '.'
-     * progress dots, which would corrupt pure-JSON output). The caller owns restoring
-     * System.out.
+     * Depth-first resolution of the transitive same-directory sibling imports of
+     * {@code path}, appending files to {@code order} in dependency order (dependencies
+     * before dependents), skipping {@code visited}.
      */
-    private static String exportOne(Element root) {
-        SysMLInteractive interactive = SysMLInteractive.getInstance();
-
-        // Everything below pollutes stdout; discard it. The caller restores System.out.
-        System.setOut(new java.io.PrintStream(java.io.OutputStream.nullOutputStream()));
-
+    private static void resolveImports(String path, java.util.Set<String> visited, java.util.List<String> order) {
+        if (!visited.add(path)) {
+            return;
+        }
         try {
-            org.eclipse.emf.ecore.resource.Resource res =
-                    interactive.getResourceSet().createResource(
-                            org.eclipse.emf.common.util.URI.createURI("windtrader-export.sysml"));
-            res.getContents().add(root);
-
-            interactive.addResourceToIndex(res);
-            boolean transformFailed = false;
-            try {
-                interactive.resolveAllInputResources();
-            } catch (Exception rerr) {
-                System.err.println("error: resolveAllInputResources: " + rerr.getMessage());
-                transformFailed = true;
+            String text = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(path)),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            java.nio.file.Path dir = java.nio.file.Paths.get(path).toAbsolutePath().getParent();
+            java.nio.file.Path self = java.nio.file.Paths.get(path).toAbsolutePath();
+            for (String ns : importedNamespaces(text)) {
+                java.nio.file.Path cand = dir.resolve(ns + ".sysml");
+                if (java.nio.file.Files.exists(cand)) {
+                    java.nio.file.Path abs = cand.toAbsolutePath();
+                    if (!abs.equals(self)) {
+                        resolveImports(abs.toString(), visited, order);
+                        order.add(abs.toString());
+                    }
+                }
             }
-            try {
-                interactive.transformAll(true);
-            } catch (Exception terr) {
-                System.err.println("error: transformAll: " + terr.getMessage());
-                transformFailed = true;
-            }
-            if (transformFailed) {
-                // Resolve/transform is part of the export contract: a failure here
-                // means the emitted JSON would be partial or wrong-shaped. Fail
-                // loudly (null => caller returns EXIT_RUNTIME) rather than emit
-                // silently-wrong JSON and exit 0.
-                return null;
-            }
-
-            JsonElementProcessingFacade facade = new JsonElementProcessingFacade();
-            Traversal traversal = new Traversal(facade, true);
-            traversal.visit(root);
-            facade.postProcess(root);
-            return facade.toJson(true);
         } catch (Throwable t) {
-            t.printStackTrace(System.err);
+            // best-effort
+        }
+    }
+
+    /**
+     * Extract the first segment of every {@code import Ns::...} statement in {@code text}
+     * (the namespace being imported), as a de-duplicated list.
+     */
+    private static java.util.List<String> importedNamespaces(String text) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile(
+                "(?im)^\\s*(?:public|private)?\\s*import\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*:[:*]").matcher(text);
+        while (m.find()) {
+            String ns = m.group(1);
+            if (!out.contains(ns)) {
+                out.add(ns);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Resolve the SysML standard-library directory (bundled cache or
+     * WINDTRADER_SYSML_LIBRARY override).
+     */
+    private static String ensureLibraryDir() {
+        try {
+            String libDir = bundledLibraryDir();
+            if (libDir == null) {
+                System.err.println("error: msg=SysML standard library unavailable; cannot export.");
+            }
+            return libDir;
+        } catch (Throwable t) {
+            System.err.println("error: msg=export: library resolution failed: " + t.getMessage());
             return null;
         }
     }
@@ -316,15 +381,7 @@ public class RoundTrip {
         }
 
         int fails = 0;
-        final java.io.PrintStream realOut = System.out; // capture real stdout before exportOne redirects
-        // Load the standard library ONCE for the whole batch (stdout discarded for the
-        // load library's "Reading ..." chatter), matching the once-per-process contract.
-        System.setOut(new java.io.PrintStream(java.io.OutputStream.nullOutputStream()));
-        boolean libOk = ensureLibraryLoaded();
-        System.setOut(realOut);
-        if (!libOk) {
-            System.exit(EXIT_RUNTIME);
-        }
+        final java.io.PrintStream realOut = System.out;
         for (String path : paths) {
             try {
                 String text = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(path)),
@@ -341,7 +398,7 @@ public class RoundTrip {
                     fails++;
                     continue;
                 }
-                String json = exportOne((Element) rootObj);
+                String json = runJupyterExport(text, path);
                 if (json == null) {
                     System.err.println("FAIL " + path + " (export returned null)");
                     fails++;
@@ -438,16 +495,17 @@ public class RoundTrip {
                     System.out.println();
                 }
             } else if ("export".equals(cmd)) {
-                // main's parse gate above already rejected a null root; keep a
-                // defensive instanceof so a non-Element root can't ClassCast below.
-                Object rootObj = pr.getRootASTElement();
-                if (!(rootObj instanceof Element)) {
-                    System.err.println("error: msg=Parsed successfully but produced no root AST element.");
-                    System.exit(EXIT_INVALID);
+                // Delegate to the pilot's Jupyter-faithful export path
+                // (SysMLInteractive.export). This reproduces the pilot's %export output
+                // exactly — the expanded element graph with populated references —
+                // and avoids the SysML2JSON CLI's transformAll NPE on control-flow /
+                // cross-resource models. See Westfall-io/windtrader-java#11.
+                String json = runJupyterExport(input);
+                if (json == null) {
+                    System.exit(EXIT_RUNTIME);
                     return;
                 }
-                int code = runExport((Element) rootObj);
-                if (code != EXIT_OK) System.exit(code);
+                System.out.println(json);
             }
 
             System.exit(EXIT_OK);
