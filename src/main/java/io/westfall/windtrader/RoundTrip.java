@@ -164,11 +164,17 @@ public class RoundTrip {
                 return null;
             }
             // Merge the JSON arrays for every named top-level member into one flat
-            // array. export(name) may itself return an ERROR: string for a member it
-            // cannot resolve — fail loudly rather than concatenate an error payload.
+            // array, DEDUPED by element @id. Multiple roots legitimately overlap
+            // (e.g. AHFProfileLib + AHFProfileMetadata, where the metadata package
+            // imports the library package and re-exports its elements) — emitting
+            // the same element twice would be duplicate EMF copies. We keep the
+            // first occurrence of each @id. export(name) may itself return an
+            // ERROR: string for a member it cannot resolve — fail loudly rather
+            // than concatenate an error payload.
             StringBuilder merged = new StringBuilder();
             merged.append('[');
             int written = 0;
+            java.util.Set<String> seenIds = new java.util.HashSet<>();
             for (String name : exportNames) {
                 Object exported = interactive.export(name, java.util.Collections.emptyList());
                 if (exported == null) {
@@ -180,14 +186,21 @@ public class RoundTrip {
                     System.err.println("error: msg=export: pilot could not resolve root element '" + name + "': " + json.trim());
                     return null;
                 }
-                // json is a JSON array "[...]"; strip brackets and splice contents.
+                // json is a JSON array "[...]"; strip brackets and splice contents,
+                // dropping elements whose @id was already emitted.
                 String inner = json.trim();
                 if (inner.startsWith("[")) inner = inner.substring(1);
                 if (inner.endsWith("]")) inner = inner.substring(0, inner.length() - 1);
-                inner = inner.trim();
-                if (!inner.isEmpty()) {
+                // Split top-level array items (they are JSON objects, so a simple
+                // brace-depth scan is safe — no braces inside strings in this output).
+                java.util.List<String> items = splitJsonArrayItems(inner);
+                for (String item : items) {
+                    String id = extractId(item);
+                    if (id != null && !seenIds.add(id)) {
+                        continue; // duplicate element — drop
+                    }
                     if (written > 0) merged.append(',');
-                    merged.append(inner);
+                    merged.append(item);
                     written++;
                 }
             }
@@ -199,6 +212,63 @@ public class RoundTrip {
         } finally {
             System.setOut(realOut);
         }
+    }
+
+    /**
+     * Split a JSON array body (text between {@code [} and {@code ]}) into its
+     * top-level items. Scans character-by-character, tracking string literals
+     * (with escape sequences) so braces inside strings are ignored, and brace
+     * depth so nested objects within an item do not create false item boundaries.
+     * An empty/blank body yields an empty list.
+     */
+    private static java.util.List<String> splitJsonArrayItems(String body) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        String s = body;
+        int depth = 0;
+        int start = 0;
+        boolean inString = false;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (inString) {
+                if (c == '\\') {
+                    i++; // skip escaped char
+                } else if (c == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+            if (c == '"') {
+                inString = true;
+            } else if (c == '{') {
+                depth++;
+            } else if (c == '}') {
+                depth--;
+                if (depth == 0) {
+                    out.add(s.substring(start, i + 1).trim());
+                    // skip the comma separator after a complete item
+                    int j = i + 1;
+                    while (j < s.length() && (s.charAt(j) == ',' || Character.isWhitespace(s.charAt(j)))) {
+                        j++;
+                    }
+                    start = j;
+                    i = j - 1;
+                }
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Extract the {@code "@id"} string from a single JSON object item, or
+     * {@code null} if absent. Used for element-identity dedup on merge.
+     */
+    private static String extractId(String item) {
+        // The pilot's element JSON is {"payload": {"@id": "...", ...}, ...}; the
+        // @id lives in payload (and @identity may repeat it). Search for the payload's
+        // "@id" key — a JSON string value — with a tight regex over the item text.
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile(
+                "\"@id\"\\s*:\\s*\"([^\"]*)\"").matcher(item);
+        return m.find() ? m.group(1) : null;
     }
 
     /**
@@ -283,11 +353,15 @@ public class RoundTrip {
             return stem.toAbsolutePath().normalize();
         }
         // Scan once per directory: map every top-level namespace -> its provider file.
+        // The index is built over ALL siblings (including `self`), because the cache
+        // key is the directory only — excluding `self` at build time would permanently
+        // hide whichever file first triggered the scan from later lookups in the same
+        // JVM. We filter the target out at lookup time below instead.
         java.util.Map<String, java.nio.file.Path> nsToFile = providerIndexCache.get(dir.toString());
         if (nsToFile == null) {
             java.util.Map<String, java.nio.file.Path> found = new java.util.HashMap<>();
             try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.list(dir)) {
-                files.filter(p -> p.toString().endsWith(".sysml") && !p.toAbsolutePath().normalize().equals(self))
+                files.filter(p -> p.toString().endsWith(".sysml"))
                      .forEach(p -> {
                          try {
                              String txt = new String(java.nio.file.Files.readAllBytes(p), java.nio.charset.StandardCharsets.UTF_8);
@@ -300,7 +374,8 @@ public class RoundTrip {
             nsToFile = found;
             providerIndexCache.put(dir.toString(), nsToFile);
         }
-        return nsToFile.get(ns);
+        java.nio.file.Path provider = nsToFile.get(ns);
+        return (provider != null && !provider.equals(self)) ? provider : null;
     }
 
     /** Per-directory cache of top-level namespace -> provider file (scan at most once per dir). */
