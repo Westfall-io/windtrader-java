@@ -44,7 +44,12 @@ def shape(d):
             for x in o: walk(x)
     for el in d: walk(el.get("payload", {}))
     dang = len([r for r in refs if r not in all_ids])
-    return len(d), dict(sorted(c.items())), dang
+    # Duplicate ELEMENT-identity ids (see check-export-golden.py). Must be 0 for every
+    # file: > 0 means the merge kept or the export produced two elements with the same
+    # payload "@id". Kept in sync with the checker's shape().
+    counter = collections.Counter(el.get("payload", {}).get("@id") for el in d if el.get("payload", {}).get("@id"))
+    dup_ids = sum(v - 1 for v in counter.values() if v > 1)
+    return len(d), dict(sorted(c.items())), dang, dup_ids
 
 files = []
 for root, _, fs in os.walk(corpus):
@@ -60,20 +65,22 @@ total_dangling = 0
 for path in files:
     rel = os.path.relpath(path, corpus)
     d = json.load(open(path + ".export.json"))
-    cnt, types, dang = shape(d)
-    manifest[rel] = {"count": cnt, "dangling_refs": dang, "types": types}
+    cnt, types, dang, dup_ids = shape(d)
+    manifest[rel] = {"count": cnt, "dangling_refs": dang, "types": types, "dup_element_ids": dup_ids}
     total_elements += cnt
     total_dangling += dang
 
-# Schema-identical to the committed export-golden.json: top-level files/ok/totals
-# (ok = number of files passed, an int), entries keyed by relative path with
-# {count, dangling_refs, types}; sorted keys so regeneration is byte-stable.
+# Schema-identical to the committed export-golden.json: top-level files/ok/totals plus
+# files_with_dup_element_ids (ok = number of files passed, an int), entries keyed by
+# relative path with {count, dangling_refs, types, dup_element_ids}; sorted keys so
+# regeneration is byte-stable.
 golden = {
     "files": len(manifest),
     "manifest": manifest,
     "ok": len(manifest),
     "total_dangling_refs": total_dangling,
     "total_elements": total_elements,
+    "files_with_dup_element_ids": sum(1 for m in manifest.values() if m["dup_element_ids"]),
 }
 with open(out, "w") as f:
     json.dump(golden, f, indent=2, sort_keys=True)

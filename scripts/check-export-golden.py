@@ -69,11 +69,12 @@ for path in files:
         fails += 1
         continue
     # Element COUNT and duplicate element-id count are the hard invariants. Count is
-    # stable across fresh JVMs and catches dropped/duplicated elements; dup_ids == 0
-    # confirms the merge dedup keyed on true element identity and dropped nothing.
-    # The type multiset and dangling-ref count are NOT asserted — the pilot's shared
-    # accumulated resource set (inherent to Jupyter's long-lived session) makes those
-    # drift by a few elements run-to-run. They are printed as informational only.
+    # stable across fresh JVMs and is the anti-loss signal (dropped elements shrink it).
+    # dup_ids == 0 is the anti-duplication signal (a null/absent extractId key would let
+    # dedup silently become a no-op and duplicates reappear). The type multiset and
+    # dangling-ref count are NOT asserted — the pilot's shared accumulated resource set
+    # (inherent to Jupyter's long-lived session) makes those drift by a few elements
+    # run-to-run. They are printed as informational only.
     if cnt != g["count"]:
         print(f"SHAPE-DIFF {rel}: count {cnt} (g {g['count']})")
         fails += 1
