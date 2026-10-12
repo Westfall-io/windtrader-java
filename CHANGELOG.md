@@ -1,3 +1,19 @@
+## [0.2.1](https://github.com/Westfall-io/windtrader-java/compare/v0.2.0...v0.2.1) (2026-10-12)
+
+
+### Bug Fixes
+
+* Faithful Jupyter export: SysMLInteractive.export + sibling-import preload ([40b3c7c](https://github.com/Westfall-io/windtrader-java/commit/40b3c7c453ce07ad58b723e8f57e5c98727cd28f)), closes [#11](https://github.com/Westfall-io/windtrader-java/issues/11)
+* Faithful Jupyter export: SysMLInteractive.export + sibling-import preload ([0a58c7e](https://github.com/Westfall-io/windtrader-java/commit/0a58c7e0a01dfdcec6f8b2985eaa7057f8d4a1e8))
+* Fix export defects found in review: multi-root, duplicate siblings, self-containment ([6da17a2](https://github.com/Westfall-io/windtrader-java/commit/6da17a251e87fcaf61a48028246ab7d3e8870c92))
+* Round-2 review fixes: dedup merged exports, provider-cache fix, count-only golden ([312a333](https://github.com/Westfall-io/windtrader-java/commit/312a333326d215b7526b628c2e32adac48855b97))
+* Round-3 review fix: key export dedup on element identity, not first @id ref ([11bffbc](https://github.com/Westfall-io/windtrader-java/commit/11bffbc9ce529e61fe08f1e16a188faa6d5774df))
+
+
+### Maintenance
+
+* Sync export-golden generator with dup-element-id invariant (review nits) ([17ac3b4](https://github.com/Westfall-io/windtrader-java/commit/17ac3b4f8301206f45eb51e7f79f652dcce13641))
+
 # [0.2.0](https://github.com/Westfall-io/windtrader-java/compare/v0.1.4...v0.2.0) (2026-10-08)
 
 
