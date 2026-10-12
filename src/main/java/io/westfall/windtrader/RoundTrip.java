@@ -259,15 +259,20 @@ public class RoundTrip {
     }
 
     /**
-     * Extract the {@code "@id"} string from a single JSON object item, or
-     * {@code null} if absent. Used for element-identity dedup on merge.
+     * Extract the element's own identity {@code "@id"} from a single JSON object item,
+     * or {@code null} if absent. Used for element-identity dedup on merge.
+     *
+     * <p>The pilot's element JSON ends with an unambiguous {@code "identity":{"@id":
+     * "<own>"}} whose value is the element's own id, present exactly once per item. The
+     * {@code payload} object instead contains many {@code "@id"} values that are
+     * *references* to other elements (members, typedBy, source, ...) appearing before the
+     * payload's own {@code "@id"} — so scanning for the first {@code "@id"} would key the
+     * dedup on an arbitrary reference, silently dropping distinct elements that share a
+     * first-referenced target. We therefore match the final {@code identity} object only.
      */
     private static String extractId(String item) {
-        // The pilot's element JSON is {"payload": {"@id": "...", ...}, ...}; the
-        // @id lives in payload (and @identity may repeat it). Search for the payload's
-        // "@id" key — a JSON string value — with a tight regex over the item text.
         java.util.regex.Matcher m = java.util.regex.Pattern.compile(
-                "\"@id\"\\s*:\\s*\"([^\"]*)\"").matcher(item);
+                "\"identity\"\\s*:\\s*\\{\\s*\"@id\"\\s*:\\s*\"([^\"]*)\"").matcher(item);
         return m.find() ? m.group(1) : null;
     }
 

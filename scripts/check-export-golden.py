@@ -49,26 +49,36 @@ def shape(d):
             for x in o: walk(x)
     for el in d: walk(el.get("payload", {}))
     dang = len([r for r in refs if r not in all_ids])
-    return len(d), dict(sorted(c.items())), dang
+    # Duplicate ELEMENT-identity ids: the number of payload "@id" values that occur
+    # more than once. The export merge dedups by identity, so this must be 0 — any
+    # positive value means distinct elements collided on the dedup key and one was
+    # silently dropped. (This is the round-3 invariant: count alone cannot distinguish
+    # a clean dedup from one that dropped elements.)
+    counter = collections.Counter(el.get("payload", {}).get("@id") for el in d if el.get("payload", {}).get("@id"))
+    dup_ids = sum(v - 1 for v in counter.values() if v > 1)
+    return len(d), dict(sorted(c.items())), dang, dup_ids
 
 fails = 0
 for path in files:
     rel = os.path.relpath(path, CORPUS)
     d = json.load(open(path + ".export.json"))
-    cnt, types, dang = shape(d)
+    cnt, types, dang, dup_ids = shape(d)
     g = golden.get(rel)
     if g is None:
         print(f"NO-GOLDEN {rel}")
         fails += 1
         continue
-    # Element COUNT is the hard invariant: it is stable across fresh JVMs and is the
-    # signal that catches dropped or duplicated elements (the regression this golden
-    # exists to prevent). The type multiset and dangling-ref count are NOT asserted —
-    # the pilot's shared accumulated resource set (inherent to Jupyter's long-lived
-    # session) makes those drift by a few elements run-to-run. They are printed as
-    # informational only.
+    # Element COUNT and duplicate element-id count are the hard invariants. Count is
+    # stable across fresh JVMs and catches dropped/duplicated elements; dup_ids == 0
+    # confirms the merge dedup keyed on true element identity and dropped nothing.
+    # The type multiset and dangling-ref count are NOT asserted — the pilot's shared
+    # accumulated resource set (inherent to Jupyter's long-lived session) makes those
+    # drift by a few elements run-to-run. They are printed as informational only.
     if cnt != g["count"]:
         print(f"SHAPE-DIFF {rel}: count {cnt} (g {g['count']})")
+        fails += 1
+    elif dup_ids != 0:
+        print(f"SHAPE-DIFF {rel}: {dup_ids} duplicate element ids (must be 0)")
         fails += 1
     elif types != g["types"] or dang != g["dangling_refs"]:
         print(f"INFO {rel}: count matches ({cnt}); types/dangling differ run-to-run"
