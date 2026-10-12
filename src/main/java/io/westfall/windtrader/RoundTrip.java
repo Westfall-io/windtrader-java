@@ -138,34 +138,61 @@ public class RoundTrip {
                 return null;
             }
             Element root = result.getRootElement();
-            String name = (root == null) ? null : root.getQualifiedName();
-            if ((name == null || name.isBlank()) && root instanceof org.omg.sysml.lang.sysml.Namespace) {
-                // Bare part def / usage: root namespace is unnamed; use first named
-                // owned member (e.g. the member element of a bare `part def P;`).
-                for (Element m : ((org.omg.sysml.lang.sysml.Namespace) root).getOwnedMember()) {
-                    String mn = m.getName();
-                    if (mn != null && !mn.isBlank()) { name = mn; break; }
+            java.util.List<String> exportNames = new java.util.ArrayList<>();
+            if (root != null) {
+                String qn = root.getQualifiedName();
+                if (qn != null && !qn.isBlank()) {
+                    exportNames.add(qn);
+                } else if (root instanceof org.omg.sysml.lang.sysml.Namespace) {
+                    // The file root namespace is unnamed (typical for a file with
+                    // multiple top-level packages/definitions). Export EVERY named
+                    // top-level member — never silently drop later roots (e.g. a
+                    // RootPackageTest with P1/P2/P3 must keep all three, and an
+                    // AHFProfileLib that also declares AHFProfileMetadata must not
+                    // truncate to the first). Each goes through the same Jupyter
+                    // faithful export(name) path; their element arrays are merged.
+                    for (Element m : ((org.omg.sysml.lang.sysml.Namespace) root).getOwnedMember()) {
+                        String mn = m.getName();
+                        if (mn != null && !mn.isBlank()) {
+                            exportNames.add(mn);
+                        }
+                    }
                 }
             }
-            if (name == null || name.isBlank()) {
+            if (exportNames.isEmpty()) {
                 System.err.println("error: msg=export: cannot determine an exportable root element name.");
                 return null;
             }
-            Object exported = interactive.export(name, java.util.Collections.emptyList());
-            if (exported == null) {
-                System.err.println("error: msg=export: pilot export returned null.");
-                return null;
+            // Merge the JSON arrays for every named top-level member into one flat
+            // array. export(name) may itself return an ERROR: string for a member it
+            // cannot resolve — fail loudly rather than concatenate an error payload.
+            StringBuilder merged = new StringBuilder();
+            merged.append('[');
+            int written = 0;
+            for (String name : exportNames) {
+                Object exported = interactive.export(name, java.util.Collections.emptyList());
+                if (exported == null) {
+                    System.err.println("error: msg=export: pilot export returned null for '" + name + "'.");
+                    return null;
+                }
+                String json = String.valueOf(exported);
+                if (json.startsWith("ERROR:")) {
+                    System.err.println("error: msg=export: pilot could not resolve root element '" + name + "': " + json.trim());
+                    return null;
+                }
+                // json is a JSON array "[...]"; strip brackets and splice contents.
+                String inner = json.trim();
+                if (inner.startsWith("[")) inner = inner.substring(1);
+                if (inner.endsWith("]")) inner = inner.substring(0, inner.length() - 1);
+                inner = inner.trim();
+                if (!inner.isEmpty()) {
+                    if (written > 0) merged.append(',');
+                    merged.append(inner);
+                    written++;
+                }
             }
-            String json = String.valueOf(exported);
-            // The pilot's export() returns "ERROR:Couldn't resolve reference to
-            // Element 'X'" as a plain string when resolve(name) fails (e.g. bare
-            // top-level definitions the Jupyter %export magic also cannot resolve).
-            // Treat that as a loud failure — never emit an error string as export JSON.
-            if (json.startsWith("ERROR:")) {
-                System.err.println("error: msg=export: pilot could not resolve root element '" + name + "': " + json.trim());
-                return null;
-            }
-            return json;
+            merged.append(']');
+            return merged.toString();
         } catch (Throwable t) {
             t.printStackTrace(System.err);
             return null;
@@ -180,23 +207,31 @@ public class RoundTrip {
      * Jupyter accumulates parsed cells so a later cell's {@code import Sibling::*}
      * resolves.
      *
-     * <p>Only siblings physically present next to {@code sourcePath} that the target
-     * (transitively) imports are processed; standard-library namespaces (ScalarValues,
-     * SI, Time, ...) are already provided by {@code loadLibrary} and never re-processed
-     * here. We look for {@code import Ns::*} / {@code import Ns::**} statements in each
-     * file and map {@code Ns} to an adjacent {@code Ns.sysml}.
+     * <p>A sibling is any {@code .sysml} file next to {@code sourcePath} that provides
+     * a namespace the target transitively imports. A namespace maps to a provider file
+     * either by the file-stem heuristic ({@code Import Foo::*} → {@code Foo.sysml}) or —
+     * when no such file but a sibling declares the namespace as a top-level member —
+     * by scanning siblings (this is how {@code import AHFNorway::*} resolves to
+     * {@code AHFNorwayTopics.sysml}, where the {@code AHFNorway} namespace lives).
+     * Files are visited once (deduped) in post-order, so a diamond import chain never
+     * processes a sibling twice (which would create duplicate EMF element copies).
+     * Standard-library namespaces are provided by {@code loadLibrary} and are not
+     * re-processed here.
      */
     private static void preloadSiblingImports(SysMLInteractive interactive, String sourcePath) {
         try {
+            java.nio.file.Path src = java.nio.file.Paths.get(sourcePath).toAbsolutePath().normalize();
             java.util.Set<String> visited = new java.util.HashSet<>();
             java.util.List<String> order = new java.util.ArrayList<>();
-            resolveImports(sourcePath, visited, order);
+            resolveImports(src.toString(), visited, order);
+            // order is post-order (deps before dependents); drop the target itself
             for (String sibling : order) {
-                if (!sibling.equals(sourcePath)) {
-                    String txt = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(sibling)),
-                            java.nio.charset.StandardCharsets.UTF_8);
-                    interactive.process(txt);
+                if (sibling.equals(src.toString())) {
+                    continue;
                 }
+                String txt = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(sibling)),
+                        java.nio.charset.StandardCharsets.UTF_8);
+                interactive.process(txt);
             }
         } catch (Throwable t) {
             // Preload is best-effort: a missing/unreadable sibling must not abort the
@@ -205,32 +240,90 @@ public class RoundTrip {
     }
 
     /**
-     * Depth-first resolution of the transitive same-directory sibling imports of
-     * {@code path}, appending files to {@code order} in dependency order (dependencies
-     * before dependents), skipping {@code visited}.
+     * Post-order DFS over the transitive same-directory sibling imports of
+     * {@code path}, appending each file to {@code order} exactly once, dependencies
+     * before dependents. Post-order visits deps, then adds {@code path} itself — never
+     * a dep after recursing — so a diamond (two paths to the same sibling) yields the
+     * sibling once. {@code visited} is keyed on normalized absolute paths, making the
+     * result independent of how the path was spelled (relative vs absolute, {@code .}/
+     * {@code ..}) and immune to import cycles re-entering the target.
      */
     private static void resolveImports(String path, java.util.Set<String> visited, java.util.List<String> order) {
-        if (!visited.add(path)) {
+        java.nio.file.Path abs = java.nio.file.Paths.get(path).toAbsolutePath().normalize();
+        if (!visited.add(abs.toString())) {
             return;
         }
         try {
-            String text = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(path)),
-                    java.nio.charset.StandardCharsets.UTF_8);
-            java.nio.file.Path dir = java.nio.file.Paths.get(path).toAbsolutePath().getParent();
-            java.nio.file.Path self = java.nio.file.Paths.get(path).toAbsolutePath();
+            String text = new String(java.nio.file.Files.readAllBytes(abs), java.nio.charset.StandardCharsets.UTF_8);
+            java.nio.file.Path dir = abs.getParent();
             for (String ns : importedNamespaces(text)) {
-                java.nio.file.Path cand = dir.resolve(ns + ".sysml");
-                if (java.nio.file.Files.exists(cand)) {
-                    java.nio.file.Path abs = cand.toAbsolutePath();
-                    if (!abs.equals(self)) {
-                        resolveImports(abs.toString(), visited, order);
-                        order.add(abs.toString());
-                    }
+                java.nio.file.Path provider = findProviderFile(dir, ns, abs);
+                if (provider != null && !provider.equals(abs)) {
+                    resolveImports(provider.toString(), visited, order);
                 }
             }
         } catch (Throwable t) {
             // best-effort
         }
+        order.add(abs.toString());
+    }
+
+    /**
+     * Locate the sibling {@code .sysml} file (next to {@code dir}) that provides the
+     * top-level namespace {@code ns}, excluding {@code self}. First tries the
+     * file-stem heuristic ({@code ns + ".sysml"}); if that file is absent, scans every
+     * sibling for a top-level declaration of {@code ns}. Returns {@code null} when no
+     * sibling provides it (e.g. a standard-library namespace, or a genuine unresolvable
+     * import). A provider found by scanning is cached per-directory so the scan runs
+     * once per directory, not once per import.
+     */
+    private static java.nio.file.Path findProviderFile(java.nio.file.Path dir, String ns, java.nio.file.Path self) {
+        java.nio.file.Path stem = dir.resolve(ns + ".sysml");
+        if (java.nio.file.Files.exists(stem)) {
+            return stem.toAbsolutePath().normalize();
+        }
+        // Scan once per directory: map every top-level namespace -> its provider file.
+        java.util.Map<String, java.nio.file.Path> nsToFile = providerIndexCache.get(dir.toString());
+        if (nsToFile == null) {
+            java.util.Map<String, java.nio.file.Path> found = new java.util.HashMap<>();
+            try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.list(dir)) {
+                files.filter(p -> p.toString().endsWith(".sysml") && !p.toAbsolutePath().normalize().equals(self))
+                     .forEach(p -> {
+                         try {
+                             String txt = new String(java.nio.file.Files.readAllBytes(p), java.nio.charset.StandardCharsets.UTF_8);
+                             for (String top : topLevelNamespaces(txt)) {
+                                 found.putIfAbsent(top, p.toAbsolutePath().normalize());
+                             }
+                         } catch (Exception ignore) { }
+                     });
+            } catch (Exception ignore) { }
+            nsToFile = found;
+            providerIndexCache.put(dir.toString(), nsToFile);
+        }
+        return nsToFile.get(ns);
+    }
+
+    /** Per-directory cache of top-level namespace -> provider file (scan at most once per dir). */
+    private static final java.util.Map<String, java.util.Map<String, java.nio.file.Path>> providerIndexCache =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * Extract the top-level namespaces declared in {@code text}: the first identifier
+     * after a {@code package}, {@code library package} or package-like keyword at
+     * column 0, plus bare {@code part def X} / {@code action def X} definitions.
+     * Used only to map an imported namespace to the sibling file that provides it.
+     */
+    private static java.util.List<String> topLevelNamespaces(String text) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile(
+                "(?m)^\\s*(?:public|private|protected)?\\s*(?:library\\s+)?(?:package|part\\s+def|action\\s+def|metadata\\s+def|item\\s+def|port\\s+def|interface\\s+def|attribute\\s+def|class\\s+def|usage|definition)\\s+([A-Za-z_][A-Za-z0-9_']*)").matcher(text);
+        while (m.find()) {
+            String nm = m.group(1);
+            if (!out.contains(nm)) {
+                out.add(nm);
+            }
+        }
+        return out;
     }
 
     /**
