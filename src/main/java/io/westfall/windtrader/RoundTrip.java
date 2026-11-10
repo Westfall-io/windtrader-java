@@ -205,13 +205,78 @@ public class RoundTrip {
                 }
             }
             merged.append(']');
-            return merged.toString();
+            return unquoteUnrestrictedNames(merged.toString());
         } catch (Throwable t) {
             t.printStackTrace(System.err);
             return null;
         } finally {
             System.setOut(realOut);
         }
+    }
+
+    /**
+     * Unwrap the textual-notation quoting the pilot's {@code toJsonTree} serializer
+     * applies to unrestricted names in {@code declaredName} / {@code declaredShortName}.
+     *
+     * <p>When a SysML v2 name is not a basic identifier it is written as an
+     * <em>unrestricted name</em> inside single quotes (e.g. {@code part def 'My Part'}
+     * or a short name {@code <'R-1'>}). The quotes delimit the name; they are not part
+     * of it. The pilot's in-memory model stores the name clean — {@code My Part} — but
+     * its {@code JsonElementProcessingFacade} export re-wraps such names in single
+     * quotes (with {@code \'} and {@code \\} escapes) when serializing to JSON. We
+     * reproduce that export path for fidelity (see {@link #runJupyterExport}), then
+     * strip the quoting here so {@code declaredName}/{@code declaredShortName} match
+     * the true model name, exactly as the pilot's model holds it. Basic identifiers
+     * (already unquoted) are left untouched.
+     *
+     * <p>The transformation applies only to the two name fields, and only when the
+     * value is an unrestricted-name literal (starts and ends with a single quote),
+     * so regular strings are never modified. Escapes inside the name are resolved
+     * ({@code \'} → {@code '}, {@code \\} → {@code \}).
+     */
+    private static String unquoteUnrestrictedNames(String mergedJson) {
+        if (mergedJson == null) return null;
+        try {
+            com.google.gson.JsonParser parser = new com.google.gson.JsonParser();
+            com.google.gson.JsonElement root = parser.parse(mergedJson);
+            if (root.isJsonArray()) {
+                for (com.google.gson.JsonElement item : root.getAsJsonArray()) {
+                    if (!item.isJsonObject()) continue;
+                    com.google.gson.JsonObject payload = item.getAsJsonObject().getAsJsonObject("payload");
+                    if (payload == null) continue;
+                    unquoteField(payload, "declaredName");
+                    unquoteField(payload, "declaredShortName");
+                }
+            }
+            return root.toString();
+        } catch (Throwable t) {
+            // Never fail an otherwise-good export because we could not re-serialize.
+            // The quoting is a cosmetic fidelity issue; returning the original is the
+            // safe fallback (the caller must not lose the export over it).
+            return mergedJson;
+        }
+    }
+
+    private static void unquoteField(com.google.gson.JsonObject payload, String field) {
+        com.google.gson.JsonElement val = payload.get(field);
+        if (val == null || !val.isJsonPrimitive() || !val.getAsJsonPrimitive().isString()) return;
+        String s = val.getAsString();
+        if (s.length() < 2 || s.charAt(0) != '\'' || s.charAt(s.length() - 1) != '\'') return;
+        // Unrestricted name: strip the surrounding quotes and resolve escapes.
+        StringBuilder sb = new StringBuilder(s.length() - 2);
+        for (int i = 1; i < s.length() - 1; i++) {
+            char c = s.charAt(i);
+            if (c == '\\' && i + 1 < s.length() - 1) {
+                char next = s.charAt(i + 1);
+                if (next == '\'' || next == '\\') {
+                    sb.append(next);
+                    i++;
+                    continue;
+                }
+            }
+            sb.append(c);
+        }
+        payload.addProperty(field, sb.toString());
     }
 
     /**
