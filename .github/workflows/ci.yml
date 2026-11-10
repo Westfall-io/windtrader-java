@@ -200,6 +200,18 @@ jobs:
           # is reproducible (scripts/generate-export-golden.sh), not hand-edited.
           python3 scripts/check-export-golden.py
 
+      - name: Export names - unrestricted names are unquoted (round-trip)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The pilot's toJsonTree serializer wraps unrestricted names in single
+          # quotes ('My Part', <'R-1'>); the in-memory model holds them clean. The
+          # export must emit the clean model names (declaredName/declaredShortName
+          # from the model, not the textual quoting), and basic identifiers must be
+          # untouched. This round-trips a quoted name, a quoted short name, both
+          # basic forms, and an escaped quote.
+          python3 scripts/check-export-names.py
+
       - name: Cross-path check - single-file export shape equals batch-export
         shell: bash
         run: |
